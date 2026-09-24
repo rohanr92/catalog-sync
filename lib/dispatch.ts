@@ -75,7 +75,7 @@ export async function sendChannel(channelKey: string, source: 'manual' | 'auto')
   for (const [idx, items] of byTpl) {
     const codes = (tpls[idx]?.codes ?? Object.keys(items[0].row)).filter((c) => c && !OFFER_COLUMNS.has(c));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([codes.map((c) => label.get(c) ?? c), codes, ...items.map((i) => codes.map((c) => i.row[c] ?? ''))]), 'Data');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([codes, ...items.map((i) => codes.map((c) => i.row[c] ?? ''))]), 'Data');
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
     const kinds = new Set(items.map((i) => i.ref.kind));
     const kind = kinds.size > 1 ? 'mixed' : [...kinds][0];
