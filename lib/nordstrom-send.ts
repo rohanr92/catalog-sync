@@ -42,7 +42,7 @@ export async function sendNordstrom(source: 'manual' | 'auto') {
   for (const [i, items] of byTpl) {
     const codes = (tpls[i]?.codes ?? Object.keys(items[0].row)).filter((c) => c && !OFFER_COLUMNS.has(c));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([codes.map((c) => label.get(c) ?? c), codes, ...items.map((x) => codes.map((c) => x.row[c] ?? ''))]), 'Data');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([codes, ...items.map((x) => codes.map((c) => x.row[c] ?? ''))]), 'Data');
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
     const fileName = `nordstrom-edits-${items.length}-rows-${Date.now()}.xlsx`;
     try {
