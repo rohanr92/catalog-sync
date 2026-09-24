@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { ensureSwatch, setSwatch, autoSwatchFromImage } from '@/lib/swatch';
+import { ensureSwatch, setSwatch, autoSwatchFromImage, suggestSwatchColour, solidSwatch } from '@/lib/swatch';
 import { uploadToShopify } from '@/lib/shopify-upload';
 import { getGroups as buildGroups } from "@/lib/groups-cache";
 import { channelColumns } from '@/lib/channel-specs';
@@ -34,8 +34,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ done, failed });
     }
 
-    const { style, color, mode, url, primaryUrl } = body;
+    const { style, color, mode, url, primaryUrl, hex } = body;
     if (!style) return NextResponse.json({ error: 'style required' }, { status: 400 });
+    if (mode === "suggest") return NextResponse.json(await suggestSwatchColour(color, primaryUrl));
+    if (mode === "solid" && hex) { const u = await solidSwatch(hex, style, color); await setSwatch(style, color, u, "solid"); return NextResponse.json({ url: u, source: "solid colour" }); }
     if (mode === 'link' && url) { await setSwatch(style, color, url, 'manual'); return NextResponse.json({ url, source: 'manual' }); }
     if (mode === 'auto' && primaryUrl) { const u = await autoSwatchFromImage(primaryUrl, style, color); await setSwatch(style, color, u, 'auto'); return NextResponse.json({ url: u, source: 'auto' }); }
     const r = await ensureSwatch(style, color, primaryUrl);

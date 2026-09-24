@@ -175,6 +175,30 @@ export default function ImagePanel({ group, channelKey, channelName, otherChanne
     setBusy(null);
   }
 
+  const [solid, setSolid] = useState<string | null>(null);
+  async function openSolid() {
+    setBusy("Sampling the colour…");
+    try {
+      const r = await fetch("/api/swatch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "suggest", style: group.styleCode, color: group.color, primaryUrl: slots.find(Boolean) ?? group.images[0] }) });
+      const j = await r.json();
+      setSolid(j.hex ?? "#cccccc");
+    } catch { setSolid("#cccccc"); }
+    setBusy(null);
+  }
+  async function makeSolid() {
+    if (!solid || solid.length !== 7) return;
+    setBusy("Making colour swatch…");
+    try {
+      const r = await fetch("/api/swatch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "solid", style: group.styleCode, color: group.color, hex: solid }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      setSwatch({ url: j.url, source: j.source });
+      setSolid(null);
+      toast.success("Colour swatch made");
+    } catch (e) { toast.error((e as Error).message); }
+    setBusy(null);
+  }
+
   function move(from: number, to: number) {
     if (from === to) return;
     setSlots((prev) => { const n = [...prev]; const [it] = n.splice(from, 1); n.splice(to, 0, it); return n; });
@@ -289,7 +313,17 @@ export default function ImagePanel({ group, channelKey, channelName, otherChanne
                       <button className="filter" style={{ fontSize: 12 }} disabled={!!busy} onClick={() => makeSwatch('auto')}>Auto from primary</button>
                       <button className="filter" style={{ fontSize: 12 }} disabled={!!busy} onClick={() => swatchFile.current?.click()}>Upload</button>
                       <button className="filter" style={{ fontSize: 12 }} disabled={!!busy} onClick={() => { const u = prompt('Swatch image URL'); if (u) makeSwatch('link', undefined, u); }}>Paste link</button>
+                      <button className="filter" style={{ fontSize: 12 }} disabled={!!busy} onClick={openSolid}>Solid colour</button>
                     </div>
+                    {solid !== null && (
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+                        <input type="color" value={solid} onChange={(e) => setSolid(e.target.value)} style={{ width: 44, height: 34, border: 0, padding: 0, background: "none", cursor: "pointer" }} />
+                        <input value={solid} onChange={(e) => setSolid(e.target.value.trim())} style={{ width: 92, padding: "6px 8px", border: "1px solid var(--rule-strong)", borderRadius: 6, fontFamily: "var(--mono)", fontSize: 12 }} />
+                        <div style={{ width: 34, height: 34, borderRadius: 6, background: solid, border: "1px solid var(--rule)" }} />
+                        <button className="btn primary" disabled={!!busy || solid.length !== 7} onClick={makeSolid}>Make colour swatch</button>
+                        <button className="btn" onClick={() => setSolid(null)}>Cancel</button>
+                      </div>
+                    )}
                     <input ref={swatchFile} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) makeSwatch('file', f); e.target.value = ''; }} />
                   </div>
                 </div>
