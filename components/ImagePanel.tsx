@@ -262,6 +262,8 @@ export default function ImagePanel({ group, channelKey, channelName, otherChanne
                       {url ? <img src={url} alt="" /> : <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Empty slot</span>}
                     </div>
                     <div className="ip-acts">
+                      {url && i > 0 && <button className="filter" title="Move left" onClick={() => move(i, i - 1)}>←</button>}
+                      {url && i < slots.length - 1 && <button className="filter" title="Move right" onClick={() => move(i, i + 1)}>→</button>}
                       <button className="filter" onClick={() => { fileFor.current = i; fileInput.current?.click(); }}>{url ? 'Replace' : 'Add'}</button>
                       {url && !onShopify(url) && <button className="filter" disabled={!!busy} onClick={() => uploadSlots([i])}>Upload</button>}
                       {url && <button className="filter" disabled={!!busy} onClick={() => downloadSlots([i])}>Download</button>}
