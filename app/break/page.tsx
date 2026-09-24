@@ -1,29 +1,10 @@
 'use client';
 
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useState } from "react";
 import { ArrowLeft } from 'lucide-react';
 import Rail from '@/components/Shell';
-import BikeRunner from '@/components/games/BikeRunner';
-import CatchShoes from '@/components/games/CatchShoes';
-import Memory from '@/components/games/Memory';
-import Simon from '@/components/games/Simon';
-import NumberMemory from '@/components/games/NumberMemory';
-import ColourMatch from '@/components/games/ColourMatch';
-import QuickMaths from '@/components/games/QuickMaths';
-import Reaction from '@/components/games/Reaction';
-import { loadBest } from '@/components/games/util';
-
-type Game = { id: string; name: string; desc: string; icon: string; grad: string; unit: string; C: ComponentType };
-const GAMES: Game[] = [
-  { id: 'bike', name: 'Bike Ride', desc: 'Jump the cones and boxes', icon: '\u{1F6B4}', grad: 'linear-gradient(135deg, #6d5ce8, #3b82f6)', unit: 'pts', C: BikeRunner },
-  { id: 'catch', name: 'Catch the Shoes', desc: 'Catch shoes, dodge bombs', icon: '\u{1F9FA}', grad: 'linear-gradient(135deg, #ec4899, #f59e0b)', unit: 'caught', C: CatchShoes },
-  { id: 'memory', name: 'Shoe Memory', desc: 'Match all eight pairs', icon: '\u{1F460}', grad: 'linear-gradient(135deg, #8b5cf6, #ec4899)', unit: 'moves', C: Memory },
-  { id: 'simon', name: 'Colour Sequence', desc: 'Repeat the growing pattern', icon: '\u{1F3B5}', grad: 'linear-gradient(135deg, #ef4444, #f59e0b)', unit: 'rounds', C: Simon },
-  { id: 'number', name: 'Number Memory', desc: 'Remember longer numbers', icon: '\u{1F522}', grad: 'linear-gradient(135deg, #0ea5e9, #10b981)', unit: 'digits', C: NumberMemory },
-  { id: 'stroop', name: 'Colour Match', desc: 'Word vs. ink colour', icon: '\u{1F3A8}', grad: 'linear-gradient(135deg, #f97316, #8b5cf6)', unit: 'pts', C: ColourMatch },
-  { id: 'maths', name: 'Quick Maths', desc: '60 seconds of sums', icon: '\u2795', grad: 'linear-gradient(135deg, #f59e0b, #ef4444)', unit: 'pts', C: QuickMaths },
-  { id: 'reaction', name: 'Reaction Test', desc: 'Tap the moment it turns green', icon: '\u26A1', grad: 'linear-gradient(135deg, #10b981, #0ea5e9)', unit: 'ms', C: Reaction },
-];
+import { loadBest } from "@/components/games/util";
+import { GAMES, type Game } from "@/components/games/registry";
 
 const css = `
 .br-wrap { padding: 26px 30px 48px; background: #f6f6f9; min-height: 100%; box-sizing: border-box; }
@@ -66,6 +47,24 @@ const css = `
 .mem .done .b { background: #e3f5ea; }
 .simon { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 320px; margin: 0 auto; }
 .simon button { aspect-ratio: 1; border: 0; border-radius: 18px; cursor: pointer; transition: opacity 0.12s, transform 0.12s; touch-action: manipulation; }
+.cg-field { background: linear-gradient(#bbf7d0, #86efac); border-radius: 16px; padding: 14px; }
+.cg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; max-width: 420px; margin: 0 auto; }
+.cg-hole { position: relative; aspect-ratio: 1.15; border: 0; background: none; cursor: pointer; overflow: hidden; touch-action: manipulation; }
+.cg-hole::after { content: ""; position: absolute; left: 8%; right: 8%; bottom: 6%; height: 30%; background: #7c4a1e; border-radius: 50%; box-shadow: inset 0 6px 0 #5b3514; }
+.cg-hole span { position: absolute; left: 0; right: 0; bottom: 14%; font-size: clamp(30px, 9vw, 44px); z-index: 1; animation: cg-up 0.18s ease-out; }
+.cg-hole span.hit { animation: cg-hit 0.25s ease-out forwards; }
+@keyframes cg-up { from { transform: translateY(70%); } to { transform: none; } }
+@keyframes cg-hit { to { transform: scale(1.3) rotate(15deg); opacity: 0; } }
+.cg-carrots { text-align: center; font-size: 22px; letter-spacing: 4px; margin-top: 10px; min-height: 30px; }
+.ws-slots { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; min-height: 50px; margin: 8px 0 14px; }
+.ws-slot { width: 36px; height: 44px; border-radius: 10px; background: #f4f3fb; border: 2px dashed #d9d5f0; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; font-family: var(--mono); }
+.ws-slot.f { background: #efeaff; border-style: solid; border-color: #b9aef5; color: #3d31a8; }
+.ws-tiles { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.ws-tile { width: 42px; height: 48px; border-radius: 12px; border: 0; background: linear-gradient(135deg, #6d5ce8, #3b82f6); color: #fff; font-weight: 800; font-size: 21px; cursor: pointer; box-shadow: 0 4px 0 #4338ca; transition: transform 0.08s; font-family: var(--mono); }
+.ws-tile:active { transform: translateY(2px); box-shadow: 0 2px 0 #4338ca; }
+.ws-tile.used { visibility: hidden; }
+.ws-shake { animation: ws-shake 0.35s; }
+@keyframes ws-shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
 @media (max-width: 700px) { .br-wrap { padding: 14px 12px 32px !important; } .br-tiles { grid-template-columns: 1fr 1fr; gap: 10px; } .br-tile { min-height: 116px; padding: 14px; } .br-tile .d { display: none; } }
 @media (prefers-reduced-motion: reduce) { .br-tile .ic { animation: none; } }
 `;
