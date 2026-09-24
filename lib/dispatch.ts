@@ -1,3 +1,4 @@
+import { ensureSwatch } from "./swatch";
 import { applyChannelEdit, commitChannelEdit } from "./channel-catalog";
 import { sendNordstrom } from "./nordstrom-send";
 import { log } from "./log";
@@ -51,17 +52,25 @@ export async function sendChannel(channelKey: string, source: 'manual' | 'auto')
   const imgs = await db.imageChange.findMany({ where: { channelKey, status: 'approved', submissionId: null } });
   for (const it of imgs) {
     const set = finalImages(it, spec.images.length);
+    const sw = spec.swatch ? (await ensureSwatch(it.styleCode, it.color, set[0]).catch(() => null))?.url ?? "" : "";
     const cps = await db.channelProduct.findMany({ where: { channelKey, upc: { in: it.gtins as string[] } }, select: { upc: true, raw: true, category: true } });
     for (const cp of cps) {
       const row = { ...(cp.raw as Row) };
       spec.images.forEach((col, i) => { row[col] = set[i] ?? ''; });
+      if (spec.swatch && !row[spec.swatch] && sw) row[spec.swatch] = sw;
       picked.push({ row, category: cp.category ?? '', ref: { kind: 'image', id: it.id, upc: cp.upc } });
     }
   }
   const cedits = await db.channelEdit.findMany({ where: { channelKey, status: "approved", submissionId: null } });
   for (const ed of cedits) {
     const cps = await db.channelProduct.findMany({ where: { channelKey, upc: { in: ed.upcs as string[] } }, select: { upc: true, raw: true, category: true } });
-    for (const cp of cps) picked.push({ row: applyChannelEdit(cp.raw as Row, cp.upc, ed.images as string[], ed.fields as Record<string, Row>, spec.images), category: cp.category ?? "", ref: { kind: "edit", id: ed.id, upc: cp.upc } });
+    const firstImg = (ed.images as string[])[0] ?? spec.images.map((c) => (cps[0]?.raw as Row | undefined)?.[c]).find(Boolean);
+    const esw = spec.swatch ? (await ensureSwatch(ed.groupKey.split("|")[0], ed.color, firstImg).catch(() => null))?.url ?? "" : "";
+    for (const cp of cps) {
+      const row = applyChannelEdit(cp.raw as Row, cp.upc, ed.images as string[], ed.fields as Record<string, Row>, spec.images);
+      if (spec.swatch && !row[spec.swatch] && esw) row[spec.swatch] = esw;
+      picked.push({ row, category: cp.category ?? "", ref: { kind: "edit", id: ed.id, upc: cp.upc } });
+    }
   }
   if (!picked.length) return { submissions: 0, rows: 0, skipped, errors: [] as string[] };
 

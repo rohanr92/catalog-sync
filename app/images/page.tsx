@@ -6,6 +6,7 @@ import useSWR, { useSWRConfig } from 'swr';
 import { toast } from 'sonner';
 import Rail from '@/components/Shell';
 import ImagePanel from '@/components/ImagePanel';
+import ImageChangePreview from "@/components/ImageChangePreview";
 import Pagination, { usePaged } from "@/components/Pagination";
 import Spinner from '@/components/Spinner';
 import { postJson } from '@/lib/fetcher';
@@ -47,6 +48,7 @@ function ImagesInner() {
   const [editing, setEditing] = useState<Item | null>(null);
   const [allNordstrom, setAllNordstrom] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [previewIds, setPreviewIds] = useState<string[] | null>(null);
 
   const { data: counts } = useSWR<Record<string, number>>('/api/image-changes?counts=1');
   const { data, mutate } = useSWR<{ items: Item[]; slots: number }>(channel ? `/api/image-changes?channel=${channel}&status=${status}` : null);
@@ -120,6 +122,7 @@ function ImagesInner() {
             <button className="btn" disabled={busy || !checked.size} onClick={() => act('approve', selectedIds)}>Approve {checked.size || ''}</button>
           </>}
           {status !== 'pending' && <button className="btn" disabled={busy || !checked.size} onClick={() => act('restore', selectedIds)}>Back to pending</button>}
+          <button className="btn" disabled={!checked.size} onClick={() => setPreviewIds(selectedIds)}>Preview sheet</button>
           <button className="btn" disabled={!checked.size} onClick={() => download(selectedIds)}>Download sheet</button>
         </header>
 
@@ -164,12 +167,14 @@ function ImagesInner() {
                 <button className="btn primary" disabled={busy} onClick={() => act('approve', [sel.id])}>Approve for {name}</button>
                 <button className="btn" disabled={busy} onClick={() => act('reject', [sel.id])}>Reject</button>
               </> : <button className="btn" disabled={busy} onClick={() => act('restore', [sel.id])}>Back to pending</button>}
+              <button className="btn" onClick={() => setPreviewIds([sel.id])}>Preview</button>
               <button className="btn" onClick={() => download([sel.id])}>Sheet</button>
             </footer>
           </>
         )}
       </aside>
 
+      {previewIds && <ImageChangePreview ids={previewIds} channelName={name} onClose={() => setPreviewIds(null)} />}
       {editing && (
         <ImagePanel
           group={asGroup(editing)}

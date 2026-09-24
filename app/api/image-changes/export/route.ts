@@ -1,3 +1,4 @@
+import { ensureSwatch } from "@/lib/swatch";
 import { NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { db } from '@/lib/db';
@@ -25,10 +26,12 @@ export async function POST(req: Request) {
     const picked: { row: Row; category: string }[] = [];
     for (const it of items) {
       const set = finalImages(it, spec.images.length);
+      const sw = spec.swatch ? (await ensureSwatch(it.styleCode, it.color, set[0]).catch(() => null))?.url ?? "" : "";
       const cps = await db.channelProduct.findMany({ where: { channelKey: channel, upc: { in: it.gtins as string[] } }, select: { raw: true, category: true } });
       for (const cp of cps) {
         const row = { ...(cp.raw as Row) };
         spec.images.forEach((col, i) => { row[col] = set[i] ?? ''; });
+        if (spec.swatch && !row[spec.swatch] && sw) row[spec.swatch] = sw;
         picked.push({ row, category: cp.category ?? '' });
       }
     }
