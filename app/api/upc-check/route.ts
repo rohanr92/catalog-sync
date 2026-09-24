@@ -17,6 +17,14 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const { action, channel, gtins } = await req.json();
+    if (action === "dismiss" && Array.isArray(gtins) && gtins.length) {
+      const key = "upcDismiss:" + channel;
+      const cur = ((await db.setting.findUnique({ where: { key } }))?.value as string[] | undefined) ?? [];
+      const next = [...new Set([...cur, ...gtins.map(String)])];
+      await db.setting.upsert({ where: { key }, update: { value: next }, create: { key, value: next } });
+      await log("approval", "UPC check: marked " + gtins.length + " size(s) as not a duplicate on " + channel);
+      return NextResponse.json({ ok: true, count: gtins.length });
+    }
     if (action !== 'ignore' || !Array.isArray(gtins) || !gtins.length) return NextResponse.json({ error: 'nothing to do' }, { status: 400 });
     const ch = await db.channel.findUnique({ where: { key: channel } });
     if (!ch) return NextResponse.json({ error: 'unknown marketplace' }, { status: 400 });

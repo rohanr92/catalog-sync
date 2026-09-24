@@ -57,5 +57,6 @@ export async function upcCheck(channelKey: string) {
     return { upc: d.upc, rows: d.n, title: r?.title ?? '', color: r?.color ?? '', size: r?.size ?? '' };
   });
 
-  return { checked: rows.length, mismatches, orphans, duplicates };
+  const dismissed = new Set((((await db.setting.findUnique({ where: { key: "upcDismiss:" + channelKey } }))?.value as string[] | undefined) ?? []));
+  return { checked: rows.length, mismatches: mismatches.filter((m) => !dismissed.has(m.nordstromUpc)), orphans, duplicates };
 }

@@ -108,7 +108,7 @@ function Inner() {
                         <td className="mono">{m.nordstromUpc}</td>
                         <td className="mono" style={{ color: '#b42318' }}>{m.marketplaceUpc}</td>
                         <td className="mono">{m.marketplaceSku}</td>
-                        <td style={{ textAlign: 'right' }}><button className="filter" disabled={busy} onClick={() => keepOut([m.nordstromUpc])}>Keep out of queue</button></td>
+                        <td style={{ textAlign: 'right' }}><button className="filter" disabled={busy} onClick={() => keepOut([m.nordstromUpc])}>Keep out of queue</button>{" "}<button className="filter" disabled={busy} onClick={async () => { await postJson("/api/upc-check", { action: "dismiss", channel, gtins: [m.nordstromUpc] }); toast.success("Marked as not a duplicate"); mutate(); }}>Not a duplicate</button></td>
                       </tr>
                     ))}</tbody>
                   </table>
