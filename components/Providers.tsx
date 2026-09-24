@@ -35,7 +35,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       onError: (e: Error) => toast.error(e.message, { id: 'load-error' }),
     }}>
       {children}
-      <Toaster position="bottom-right" theme="light" closeButton toastOptions={{ style: { fontFamily: 'var(--sans)', fontSize: 13 } }} />
+      <Toaster position="bottom-right" theme="light" richColors closeButton toastOptions={{ style: { fontFamily: 'var(--sans)', fontSize: 13 } }} />
     </SWRConfig>
   );
 }

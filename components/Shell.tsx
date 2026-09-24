@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Suspense } from 'react';
 import useSWR from 'swr';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Package, Download, ScanBarcode, ListChecks, Images, Send, FolderTree, Tags, ListFilter, Ruler, Upload, Plug, ScrollText, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Package, Download, ScanBarcode, ListChecks, Images, Send, FolderTree, Tags, ListFilter, Ruler, Upload, Plug, ScrollText, type LucideIcon } from 'lucide-react';
 import Spinner from './Spinner';
 import { useMounted } from '@/lib/use-mounted';
 import type { ChannelSummary } from '@/lib/types';
@@ -62,6 +62,9 @@ function RailInner() {
   const firstQueue = channels[0] ? `/queue?channel=${channels[0].key}` : '/queue';
 
   const sections: Section[] = [
+    { title: "Home", color: "#6d5ce8", bg: "#efeaff", items: [
+      { href: "/home", label: "Overview", icon: LayoutDashboard, desc: "Everything waiting, sending and running, at a glance" },
+    ] },
     { title: 'Nordstrom', color: '#4b3fb3', bg: '#ece9fd', source: true, items: [
       { href: '/nordstrom', label: 'Edit products', icon: Package, desc: 'Every Nordstrom product — edit images and info, then send to Nordstrom' },
       { href: '/pulls', label: 'Pull history', icon: Download, desc: 'Every Nordstrom import, manual or automatic' },
@@ -95,6 +98,7 @@ function RailInner() {
     <MobileBar />
     <nav className="rail rl">
       <style>{css}</style>
+      <Link href="/home" style={{ textDecoration: "none", color: "inherit" }}>
       <div className="rl-brand">
         <div className="rl-logo">CS</div>
         <div>
@@ -105,6 +109,7 @@ function RailInner() {
           </div>
         </div>
       </div>
+      </Link>
 
       {sections.map((s) => (
         <div className="rl-sec" key={s.title}>

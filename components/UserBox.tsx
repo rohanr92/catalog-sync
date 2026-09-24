@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import useSWR from 'swr';
-import { LogOut, UserCog, Users } from 'lucide-react';
+import { LogOut, UserCog, Users, Gamepad2 } from "lucide-react";
 
 export default function UserBox() {
   const { data: me } = useSWR<{ name: string; email: string; role: string }>('/api/auth/me');
@@ -19,6 +19,7 @@ export default function UserBox() {
         </div>
       </div>
       <Link href="/account" style={link}><UserCog size={14} /> Account</Link>
+      <Link href="/break" style={link}><Gamepad2 size={14} /> Break room</Link>
       {me && ['owner', 'admin'].includes(me.role) && <Link href="/users" style={link}><Users size={14} /> Users</Link>}
       <button onClick={signOut} style={{ ...link, border: 0, background: 'none', cursor: 'pointer', width: '100%', font: 'inherit', fontSize: 12.5 }}><LogOut size={14} /> Sign out</button>
     </div>
