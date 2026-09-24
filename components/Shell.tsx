@@ -1,5 +1,6 @@
 'use client';
 
+import MobileBar from "./MobileBar";
 import UserBox from "./UserBox";
 import Link from 'next/link';
 import { Suspense } from 'react';
@@ -89,6 +90,8 @@ function RailInner() {
   };
 
   return (
+    <>
+    <MobileBar />
     <nav className="rail rl">
       <style>{css}</style>
       <div className="rl-brand">
@@ -142,6 +145,7 @@ function RailInner() {
 
       <UserBox />
     </nav>
+    </>
   );
 }
 

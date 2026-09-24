@@ -6,6 +6,7 @@ import type { Group } from '@/lib/types';
 import { imageSpecs } from '@/lib/image-specs';
 import { channelColumns } from '@/lib/channel-specs';
 import Spinner from './Spinner';
+import ImageGuide from "./ImageGuide";
 
 interface Props {
   group: Group;
@@ -227,6 +228,7 @@ export default function ImagePanel({ group, channelKey, channelName, otherChanne
         ) : (
           <>
             <div style={{ padding: 18, overflowY: 'auto' }}>
+              <ImageGuide channelKey={channelKey} channelName={channelName} />
               <div className="ip-bar">
                 <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input type="checkbox" checked={filled.length > 0 && filled.every((i) => picked.has(i))} onChange={(e) => setPicked(e.target.checked ? new Set(filled) : new Set())} /> Select all
