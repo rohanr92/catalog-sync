@@ -1,5 +1,6 @@
 'use client';
 
+import MarketplaceNav from "./MarketplaceNav";
 import MobileBar from "./MobileBar";
 import UserBox from "./UserBox";
 import Link from 'next/link';
@@ -143,6 +144,7 @@ function RailInner() {
         </div>
       ))}
 
+      <MarketplaceNav />
       <UserBox />
     </nav>
     </>

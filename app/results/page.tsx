@@ -14,7 +14,7 @@ interface Sub {
   accepted: number; rejected: number; importId: string | null; sentAt: string; completedAt: string | null;
   errorReport: { upc: string; title: string; message: string }[] | null; reportName: string | null; fileUrl: string | null; reports?: { i: number; kind: string; name: string }[];
 }
-interface D { ready: { sizes: number; images: number }; nextAllowedAt: string | null; autoPush: boolean; connected: boolean; submissions: Sub[] }
+interface D { ready: { sizes: number; images: number; edits?: number }; nextAllowedAt: string | null; autoPush: boolean; connected: boolean; submissions: Sub[] }
 
 const css = `
 .rs-wrap { padding: 28px 32px 48px; background: #f5f5f5; min-height: 100%; box-sizing: border-box; }
@@ -57,7 +57,7 @@ function status(s: Sub): { text: string; cls: string } {
   if (s.rejected > 0) return { text: 'Complete', cls: 'st-errors' };
   return { text: 'Complete', cls: 'st-complete' };
 }
-const kindLabel: Record<string, string> = { "nordstrom-edit": "Nordstrom edits", listing: 'New listings', images: 'Image updates', mixed: 'Listings + images' };
+const kindLabel: Record<string, string> = { "nordstrom-edit": "Nordstrom edits", edit: "Product edits", listing: 'New listings', images: 'Image updates', mixed: 'Listings + images' };
 const fmt = (d: string) => new Date(d).toLocaleString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 function ResultsInner() {
@@ -90,7 +90,7 @@ function ResultsInner() {
     try { await postJson('/api/dispatch', { action: 'poll', channel }); await mutate(); toast.success(`Checked with ${name}`); } catch (e) { toast.error((e as Error).message); }
   }
 
-  const waiting = (data?.ready.sizes ?? 0) + (data?.ready.images ?? 0);
+  const waiting = (data?.ready.sizes ?? 0) + (data?.ready.images ?? 0) + (data?.ready.edits ?? 0);
   const nextAt = data?.nextAllowedAt ? new Date(data.nextAllowedAt) : null;
 
   return (
@@ -110,7 +110,7 @@ function ResultsInner() {
               <div style={{ flex: 1, minWidth: 260 }}>
                 <div className="t">Ready to send to {name}</div>
                 <div className="s">
-                  {data.ready.sizes} approved listing rows · {data.ready.images} approved image updates
+                  {data.ready.sizes} approved listing rows · {data.ready.images} approved image updates{data.ready.edits ? " · " + data.ready.edits + " product edit rows" : ""}
                   {nextAt ? ` · next send allowed at ${nextAt.toLocaleTimeString()} (15-minute limit)` : ''}
                   {!data.connected && <> · <Link href="/settings" style={{ color: 'var(--alert)' }}>API not connected</Link></>}
                 </div>

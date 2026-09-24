@@ -35,6 +35,7 @@ export async function register() {
   }, 500);
 
   job('pull', 60_000, async () => { const { pullTick } = await import('./lib/nordstrom-pull'); await pullTick(); });
+  job("mpull", 60_000, async () => { const { channelPullTick } = await import("./lib/channel-pull"); await channelPullTick(); });
   job('status', 60_000, async () => { const { pollOpen } = await import('./lib/dispatch'); await pollOpen(); });
   job('autopush', 5 * 60_000, async () => { const { autoPushTick } = await import('./lib/dispatch'); await autoPushTick(); });
 

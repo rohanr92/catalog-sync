@@ -1,3 +1,4 @@
+import { applyChannelEdit, commitChannelEdit } from "./channel-catalog";
 import { sendNordstrom } from "./nordstrom-send";
 import { log } from "./log";
 import * as XLSX from 'xlsx';
@@ -8,7 +9,7 @@ import { finalImages } from './image-changes';
 import { uploadProducts, importStatus, importReport, RateLimited } from './mirakl';
 
 type Row = Record<string, string>;
-type Ref = { kind: 'listing' | 'image'; id: string; upc: string };
+type Ref = { kind: "listing" | "image" | "edit"; id: string; upc: string };
 export const SEND_GAP_MS = 15 * 60_000;
 const norm = (u: string) => String(u ?? '').trim().replace(/^0+/, '');
 
@@ -20,7 +21,8 @@ export async function readyToSend(channelKey: string) {
     db.pendingChange.count({ where: { channelId: ch.id, approval: 'approved', submissionId: null } }),
     db.imageChange.count({ where: { channelKey, status: 'approved', submissionId: null } }),
   ]);
-  return { sizes, images };
+  const edits = (await db.channelEdit.findMany({ where: { channelKey, status: "approved", submissionId: null }, select: { upcs: true } })).reduce((n, e) => n + (e.upcs as string[]).length, 0);
+  return { sizes, images, edits };
 }
 
 export async function nextAllowedAt(channelKey: string): Promise<Date | null> {
@@ -56,6 +58,11 @@ export async function sendChannel(channelKey: string, source: 'manual' | 'auto')
       picked.push({ row, category: cp.category ?? '', ref: { kind: 'image', id: it.id, upc: cp.upc } });
     }
   }
+  const cedits = await db.channelEdit.findMany({ where: { channelKey, status: "approved", submissionId: null } });
+  for (const ed of cedits) {
+    const cps = await db.channelProduct.findMany({ where: { channelKey, upc: { in: ed.upcs as string[] } }, select: { upc: true, raw: true, category: true } });
+    for (const cp of cps) picked.push({ row: applyChannelEdit(cp.raw as Row, cp.upc, ed.images as string[], ed.fields as Record<string, Row>, spec.images), category: cp.category ?? "", ref: { kind: "edit", id: ed.id, upc: cp.upc } });
+  }
   if (!picked.length) return { submissions: 0, rows: 0, skipped, errors: [] as string[] };
 
   const tpls = (await db.setting.findMany({ where: { key: { startsWith: `template:${channelKey}:` } } })).map((t) => t.value as { codes: string[]; categories: string[] });
@@ -80,6 +87,8 @@ export async function sendChannel(channelKey: string, source: 'manual' | 'auto')
       const imageIds = [...new Set(items.filter((i) => i.ref.kind === 'image').map((i) => i.ref.id))];
       if (listingIds.length) await db.pendingChange.updateMany({ where: { id: { in: listingIds } }, data: { submissionId: sub.id, sendStatus: 'sent', sendError: null } });
       if (imageIds.length) await db.imageChange.updateMany({ where: { id: { in: imageIds } }, data: { submissionId: sub.id, sendStatus: 'sent', sendError: null } });
+      const editIds = [...new Set(items.filter((i) => i.ref.kind === "edit").map((i) => i.ref.id))];
+      if (editIds.length) await db.channelEdit.updateMany({ where: { id: { in: editIds } }, data: { status: "sent", submissionId: sub.id, sendError: null } });
       sent += items.length; subs++;
     } catch (e) {
       const msg = (e as Error).message;
@@ -122,7 +131,8 @@ export async function pollSubmission(subId: string) {
   const listings = await db.pendingChange.findMany({ where: { submissionId: sub.id }, select: { id: true, product: { select: { gtin: true, title: true } } } });
   const images = await db.imageChange.findMany({ where: { submissionId: sub.id } });
   const edits = await db.nordstromEdit.findMany({ where: { submissionId: sub.id } });
-  const sentUpcs = new Set<string>([...listings.map((l) => norm(l.product.gtin)), ...images.flatMap((i) => (i.gtins as string[]).map(norm)), ...edits.flatMap((e) => (e.gtins as string[]).map(norm))]);
+  const cedits = await db.channelEdit.findMany({ where: { submissionId: sub.id } });
+  const sentUpcs = new Set<string>([...listings.map((l) => norm(l.product.gtin)), ...images.flatMap((i) => (i.gtins as string[]).map(norm)), ...edits.flatMap((e) => (e.gtins as string[]).map(norm)), ...cedits.flatMap((e) => (e.upcs as string[]).map(norm))]);
 
   const rejected = new Map<string, string>();
   let reportFile: string | null = null, reportName: string | null = null;
@@ -165,6 +175,19 @@ export async function pollSubmission(subId: string) {
     }
   }
 
+  for (const ce of cedits) {
+    const up = ce.upcs as string[];
+    const msgs = up.map((g) => (failedWhole ? reason : rejected.get(norm(g)))).filter(Boolean) as string[];
+    if (msgs.length) {
+      rej += msgs.length; acc += up.length - msgs.length;
+      up.forEach((g) => { const m = failedWhole ? reason : rejected.get(norm(g)); if (m) rejRows.push({ upc: g, title: ce.title + " " + ce.color + " — product edit", message: m }); });
+      await db.channelEdit.update({ where: { id: ce.id }, data: { status: "rejected", sendError: msgs[0] } });
+    } else {
+      acc += up.length;
+      await db.channelEdit.update({ where: { id: ce.id }, data: { status: "accepted", sendError: null } });
+      await commitChannelEdit(ce);
+    }
+  }
   for (const ed of edits) {
     const gt = ed.gtins as string[];
     const msgs = gt.map((g) => (failedWhole ? reason : rejected.get(norm(g)))).filter(Boolean) as string[];
@@ -205,7 +228,7 @@ export async function autoPushTick() {
   for (const [channelKey, on] of Object.entries(map)) {
     if (!on) continue;
     const r = await readyToSend(channelKey);
-    if (!r.sizes && !r.images) continue;
+    if (!r.sizes && !r.images && !("edits" in r && r.edits)) continue;
     if (await nextAllowedAt(channelKey)) continue;
     try { await sendChannel(channelKey, "auto"); } catch (e) { await log("push", "Auto-push to " + channelKey + " not sent: " + (e as Error).message, "warn"); }
   }

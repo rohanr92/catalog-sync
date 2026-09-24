@@ -440,3 +440,21 @@ model User {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 }
+
+model ChannelEdit {
+  id           String   @id @default(cuid())
+  channelKey   String
+  groupKey     String   // style|colour as grouped on the marketplace
+  color        String
+  title        String
+  upcs         Json
+  images       Json     @default("[]")
+  fields       Json     @default("{}") // { "*": {...all sizes}, "<upc>": {...one size} }
+  status       String   @default("draft") // draft | approved | sent | accepted | rejected
+  submissionId String?
+  sendError    String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([channelKey, status])
+}
