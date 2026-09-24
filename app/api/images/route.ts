@@ -1,7 +1,8 @@
-import { log } from "@/lib/log";
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { channelColumns } from '@/lib/channel-specs';
+import { groupKeyOf } from '@/lib/channel-catalog';
+import { log } from '@/lib/log';
 import { short } from '@/lib/errors';
 
 type Row = Record<string, string>;
@@ -12,6 +13,7 @@ export async function POST(req: Request) {
     if (!channel || !style || color == null || !Array.isArray(images)) return NextResponse.json({ error: 'channel, style, color, images required' }, { status: 400 });
     const targets: string[] = [channel, ...((alsoChannels as string[]) ?? [])];
 
+    // Images for the sizes being listed from the queue.
     for (const channelKey of targets) {
       await db.imageSet.upsert({
         where: { channelKey_styleCode_color: { channelKey, styleCode: style, color } },
@@ -20,33 +22,30 @@ export async function POST(req: Request) {
       });
     }
 
-    // Every size of this colour that is already live on the marketplace gets the same image set, via Image changes.
-    const products = await db.product.findMany({ where: { color }, select: { gtin: true, sku: true, title: true, categoryRaw: true, attrs: true } });
-    const colour = products.filter((p) => ((p.attrs as Row)['variant-group-code'] || (p.attrs as Row)['vpn'] || p.sku || p.gtin) === style);
-    const gtins = colour.map((p) => p.gtin);
+    // Sizes of this colour already live on the marketplace: prepare a draft under
+    // Marketplace products → Edit products, so the whole colour can match.
+    // (Image changes stays for Nordstrom-driven changes only.)
+    const products = await db.product.findMany({ where: { color }, select: { gtin: true, sku: true, title: true, attrs: true } });
+    const gtins = products.filter((p) => ((p.attrs as Row)['variant-group-code'] || (p.attrs as Row)['vpn'] || p.sku || p.gtin) === style).map((p) => p.gtin);
     let liveSizesQueued = 0;
 
     for (const channelKey of targets) {
       const slots = channelColumns[channelKey]?.images.length ?? 8;
       const want = (images as string[]).slice(0, slots);
-      const live = await db.channelProduct.findMany({ where: { channelKey, upc: { in: gtins } }, select: { upc: true, images: true } });
+      const live = await db.channelProduct.findMany({ where: { channelKey, upc: { in: gtins } }, select: { upc: true, images: true, styleCode: true, title: true, color: true } });
       const differ = live.filter((l) => JSON.stringify(((l.images as string[]) ?? []).slice(0, slots)) !== JSON.stringify(want));
       if (!differ.length) continue;
 
-      const old = (differ[0].images as string[]) ?? [];
-      const positions: number[] = [];
-      for (let i = 0; i < Math.max(old.length, want.length); i++) if (old[i] !== want[i]) positions.push(i + 1);
-      const data = {
-        title: colour[0]?.title ?? '', category: colour[0]?.categoryRaw ?? '', gtins: differ.map((d) => d.upc),
-        positions, oldImages: old, newImages: want, images: want, source: 'manual', detectedAt: new Date(),
-      };
-      const open = await db.imageChange.findFirst({ where: { channelKey, styleCode: style, color, status: 'pending' } });
-      if (open) await db.imageChange.update({ where: { id: open.id }, data });
-      else await db.imageChange.create({ data: { channelKey, styleCode: style, color, ...data } });
+      const groupKey = groupKeyOf(differ[0]);
+      const open = await db.channelEdit.findFirst({ where: { channelKey, groupKey, status: { in: ['draft', 'approved', 'rejected'] } } });
+      const upcs = [...new Set([...((open?.upcs as string[]) ?? []), ...differ.map((d) => d.upc)])];
+      const data = { title: differ[0].title ?? '', color: differ[0].color ?? color, upcs, images: want, status: 'draft', sendError: null };
+      if (open) await db.channelEdit.update({ where: { id: open.id }, data });
+      else await db.channelEdit.create({ data: { channelKey, groupKey, fields: {}, ...data } });
       liveSizesQueued += differ.length;
     }
 
-    await log("approval", "Images saved for " + style + " " + color + " on " + targets.join(", "));
+    await log('approval', 'Images saved for ' + style + ' ' + color + ' on ' + targets.join(', ') + (liveSizesQueued ? ' — ' + liveSizesQueued + ' live size(s) drafted under Marketplace products' : ''));
     return NextResponse.json({ ok: true, channels: targets, liveSizesQueued });
   } catch (e) {
     return NextResponse.json({ error: short(e) }, { status: 503 });

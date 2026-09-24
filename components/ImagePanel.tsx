@@ -189,7 +189,7 @@ export default function ImagePanel({ group, channelKey, channelName, otherChanne
       else {
         const res = await fetch('/api/images', { method: 'POST', body: JSON.stringify({ channel: channelKey, style: group.styleCode, color: group.color, images, alsoChannels: [...also] }) });
         const j = await res.json();
-        if (j.liveSizesQueued) toast.message(`${j.liveSizesQueued} size${j.liveSizesQueued === 1 ? '' : 's'} of this colour already live — added to Image changes so the whole colour matches`);
+        if (j.liveSizesQueued) toast.message(`${j.liveSizesQueued} size${j.liveSizesQueued === 1 ? '' : 's'} of this colour already live — a draft is ready under Marketplace products → Edit products to update them too`);
       }
       onSaved(); onClose();
     } catch (e) { toast.error((e as Error).message); }
