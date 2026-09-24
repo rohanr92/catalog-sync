@@ -1,0 +1,442 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Canonical catalog ----------
+
+model Product {
+  id          String   @id @default(cuid())
+  gtin        String   @unique
+  sku         String?
+  title       String
+  description String?  @db.Text
+  brand       String
+  color       String?
+  material    String?
+  categoryRaw String?
+  attrs       Json     @default("{}")
+  sourceChannel String @default("nordstrom")
+  contentHash String
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @updatedAt
+
+  images      ProductImage[]
+  snapshots   Snapshot[]
+  changes     PendingChange[]
+  listings    ChannelListing[]
+
+  @@index([contentHash])
+}
+
+model Snapshot {
+  id          String   @id @default(cuid())
+  productId   String
+  payload     Json
+  contentHash String
+  pulledAt    DateTime @default(now())
+
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, pulledAt])
+}
+
+model ProductImage {
+  id          String   @id @default(cuid())
+  productId   String
+  position    Int
+  role        String   @default("alt")
+  sourceUrl   String   @db.Text
+  storedUrl   String?  @db.Text
+  contentHash String
+  perceptualHash String?
+  width       Int
+  height      Int
+  bytes       Int
+  mime        String
+  altText     String?
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @updatedAt
+
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  renditions  ChannelImage[]
+
+  @@unique([productId, position])
+  @@index([contentHash])
+}
+
+model ChannelImage {
+  id             String   @id @default(cuid())
+  productImageId String
+  channelId      String
+  mode           String   @default("inherit") // inherit | custom | manual
+  url            String?  @db.Text
+  position       Int
+  specVersion    String
+  status         String   @default("ok")      // ok | stale | blocked
+  blockedReason  String?
+  locked         Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+
+  source         ProductImage @relation(fields: [productImageId], references: [id], onDelete: Cascade)
+  channel        Channel      @relation(fields: [channelId], references: [id])
+
+  @@unique([productImageId, channelId])
+}
+
+// ---------- Channels and mapping ----------
+
+model Channel {
+  id          String   @id @default(cuid())
+  key         String   @unique // macys | kohls | jcpenney | debenhams | targetplus
+  name        String
+  isSource    Boolean  @default(false)
+  active      Boolean  @default(true)
+  imageSpec   Json     @default("{}")
+
+  profiles    MappingProfile[]
+  valueMaps   ValueMap[]
+  categoryMaps CategoryMap[]
+  changes     PendingChange[]
+  listings    ChannelListing[]
+  images      ChannelImage[]
+  submissions Submission[]
+}
+
+model MappingProfile {
+  id         String   @id @default(cuid())
+  channelId  String
+  version    String
+  template   String
+  fields     Json
+  output     Json
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  channel    Channel  @relation(fields: [channelId], references: [id])
+
+  @@unique([channelId, version])
+}
+
+model ValueMap {
+  id         String @id @default(cuid())
+  channelId  String
+  attribute  String // color | material | size
+  fromValue  String
+  toValue    String
+
+  channel    Channel @relation(fields: [channelId], references: [id])
+
+  @@unique([channelId, attribute, fromValue])
+}
+
+model CategoryMap {
+  id          String @id @default(cuid())
+  channelId   String
+  fromCategory String
+  toCategory   String
+  toCategoryId String?
+  requiredAttrs Json @default("[]")
+
+  channel     Channel @relation(fields: [channelId], references: [id])
+
+  @@unique([channelId, fromCategory])
+}
+
+// ---------- Queue and dispatch ----------
+
+model PendingChange {
+  id           String   @id @default(cuid())
+  productId    String
+  channelId    String
+  changeType   String   // new | updated | suppressed
+  fieldDiffs   Json     @default("[]")
+  outputRow    Json     @default("{}")
+  validation   String   @default("pending") // pending | valid | blocked
+  blockedReason String?
+  approval     String   @default("pending") // pending | approved | rejected
+  detectedAt   DateTime @default(now())
+  decidedAt    DateTime?
+  decidedBy    String?
+  sendStatus   String?
+  sendError    String?  @db.Text
+  originImport String?
+  source       String   @default("manual")
+
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  channel      Channel  @relation(fields: [channelId], references: [id])
+  submission   Submission? @relation(fields: [submissionId], references: [id])
+  submissionId String?
+
+  @@index([channelId, approval, validation])
+}
+
+model ChannelListing {
+  id          String   @id @default(cuid())
+  productId   String
+  channelId   String
+  state       String   @default("not_listed") // not_listed | pending | live | rejected
+  offerId     String?
+  lastSyncedAt DateTime?
+  lockedFields Json    @default("[]")
+
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  channel     Channel  @relation(fields: [channelId], references: [id])
+
+  @@unique([productId, channelId])
+}
+
+model Submission {
+  id          String   @id @default(cuid())
+  channelId   String
+  importId    String?
+  fileUrl     String?
+  rowCount    Int      @default(0)
+  status      String   @default("queued") // queued | sent | processing | complete | failed
+  errorReport Json?
+  sentAt      DateTime @default(now())
+  completedAt DateTime?
+  channelKey    String    @default("")
+  kind          String    @default("listing")
+  source        String    @default("manual")
+  statusDetail  String?   @db.Text
+  accepted      Int       @default(0)
+  rejected      Int       @default(0)
+  lastCheckedAt DateTime?
+  reportFile    String?   @db.Text
+  reportName    String?
+  reports       Json?
+
+  channel     Channel  @relation(fields: [channelId], references: [id])
+  changes     PendingChange[]
+}
+
+// ---------- Channel snapshots and settings ----------
+
+model ChannelProduct {
+  id          String   @id @default(cuid())
+  channelKey  String
+  upc         String
+  channelSku  String?
+  styleCode   String?
+  color       String?
+  size        String?
+  category    String?
+  title       String?
+  images      Json     @default("[]")
+  swatchUrl   String?
+  raw         Json
+  importedAt  DateTime @default(now())
+
+  @@unique([channelKey, upc])
+  @@index([channelKey, styleCode])
+}
+
+model ImportRun {
+  id         String   @id @default(cuid())
+  channelKey String
+  fileName   String
+  rowCount   Int
+  newCount   Int      @default(0)
+  changedCount Int    @default(0)
+  source     String   @default("manual")
+  queued       Int      @default(0)
+  imageChanges Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model Setting {
+  key   String @id
+  value Json
+}
+
+model ChannelConnection {
+  channelKey String  @id
+  enabled    Boolean @default(true)
+  apiUrl     String?
+  apiKey     String?
+  shopId     String?
+  lastTestOk Boolean?
+  lastTestAt DateTime?
+  lastTestMsg String?
+  updatedAt  DateTime @updatedAt
+}
+
+model SizeMap {
+  id         String  @id @default(cuid())
+  channelKey String
+  styleCode  String?          // null = marketplace default
+  sourceSize String
+  targetSize String
+  origin     String  @default("manual") // manual | learned
+  updatedAt  DateTime @updatedAt
+
+  @@unique([channelKey, styleCode, sourceSize])
+}
+
+model ValueList {
+  id         String @id @default(cuid())
+  channelKey String
+  attribute  String
+  values     Json
+
+  @@unique([channelKey, attribute])
+}
+
+model ColumnSpec {
+  id          String  @id @default(cuid())
+  channelKey  String
+  code        String
+  label       String
+  description String? @db.Text
+  example     String?
+  requiredBy  Json    @default("{}")
+
+  @@unique([channelKey, code])
+}
+
+model ImageSet {
+  id         String   @id @default(cuid())
+  channelKey String
+  styleCode  String
+  color      String
+  images     Json     // ordered list of URLs, position = column
+  updatedAt  DateTime @updatedAt
+
+  @@unique([channelKey, styleCode, color])
+}
+
+model Swatch {
+  id        String   @id @default(cuid())
+  styleCode String
+  color     String
+  url       String   @db.Text
+  source    String   @default("auto") // auto | reused | manual
+  updatedAt DateTime @updatedAt
+
+  @@unique([styleCode, color])
+}
+
+model AttributeMap {
+  id            String @id @default(cuid())
+  channelKey    String
+  channelCode   String   // base column code, e.g. "care" or "gender"
+  nordstromCode String
+  origin        String @default("learned") // learned | manual
+  confidence    Float  @default(0)
+
+  @@unique([channelKey, channelCode])
+}
+
+model AttrValueMap {
+  id          String @id @default(cuid())
+  channelKey  String
+  channelCode String
+  fromValue   String
+  toValue     String
+  origin      String @default("learned")
+
+  @@unique([channelKey, channelCode, fromValue])
+}
+
+model CategoryDefault {
+  id         String @id @default(cuid())
+  channelKey String
+  category   String
+  code       String   // full column code
+  value      String
+  share      Float
+
+  @@unique([channelKey, category, code])
+}
+
+model RowOverride {
+  changeId  String   @id
+  values    Json
+  updatedAt DateTime @updatedAt
+}
+
+model IgnoredItem {
+  id         String   @id @default(cuid())
+  channelKey String
+  gtin       String
+  styleCode  String
+  color      String
+  title      String
+  size       String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@unique([channelKey, gtin])
+  @@index([channelKey])
+}
+
+model ImageChange {
+  id         String    @id @default(cuid())
+  channelKey String
+  styleCode  String
+  color      String
+  title      String
+  category   String    @default("")
+  gtins      Json      // this colour's UPCs listed on the marketplace
+  positions  Json      // changed slots, 1-based
+  oldImages  Json      // the marketplace's current images
+  newImages  Json      // Nordstrom's images now
+  images     Json      @default("[]") // your edited / re-hosted set
+  status     String    @default("pending") // pending | approved | rejected
+  source     String    @default("manual")  // manual | auto
+  detectedAt DateTime  @default(now())
+  decidedAt  DateTime?
+  submissionId String?
+  sendStatus   String?
+  sendError    String?  @db.Text
+  originImport String?
+
+  @@index([channelKey, status])
+}
+
+model ActivityLog {
+  id      String   @id @default(cuid())
+  at      DateTime @default(now())
+  kind    String   // pull | push | status | import | settings | system
+  level   String   @default("info") // info | warn | error
+  message String   @db.Text
+  actor   String?
+  data    Json?
+
+  @@index([at])
+}
+
+model NordstromEdit {
+  id           String   @id @default(cuid())
+  styleCode    String
+  color        String
+  title        String
+  gtins        Json     // every size of the colour
+  images       Json     @default("[]") // new image set; empty = unchanged
+  fields       Json     @default("{}") // { "*": {...all sizes}, "<upc>": {...one size} }
+  status       String   @default("draft") // draft | approved | sent | accepted | rejected
+  submissionId String?
+  sendError    String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status])
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  name               String
+  passwordHash       String
+  role               String    @default("member") // owner | admin | member | viewer
+  active             Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  tokenVersion       Int       @default(0)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}

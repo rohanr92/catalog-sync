@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "ImportRun" ADD COLUMN     "imageChanges" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "queued" INTEGER NOT NULL DEFAULT 0;
