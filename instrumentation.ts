@@ -1,5 +1,6 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+  if (process.env.DISABLE_JOBS === "1") { console.log("Background jobs disabled (DISABLE_JOBS=1)"); return; }
   const g = globalThis as unknown as { __schedulers?: boolean };
   if (g.__schedulers) return;
   g.__schedulers = true;
