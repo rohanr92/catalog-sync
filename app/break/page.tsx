@@ -1,180 +1,107 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import Rail from '@/components/Shell';
+import BikeRunner from '@/components/games/BikeRunner';
+import CatchShoes from '@/components/games/CatchShoes';
+import Memory from '@/components/games/Memory';
+import Simon from '@/components/games/Simon';
+import NumberMemory from '@/components/games/NumberMemory';
+import ColourMatch from '@/components/games/ColourMatch';
+import QuickMaths from '@/components/games/QuickMaths';
+import Reaction from '@/components/games/Reaction';
+import { loadBest } from '@/components/games/util';
+
+type Game = { id: string; name: string; desc: string; icon: string; grad: string; unit: string; C: ComponentType };
+const GAMES: Game[] = [
+  { id: 'bike', name: 'Bike Ride', desc: 'Jump the cones and boxes', icon: '\u{1F6B4}', grad: 'linear-gradient(135deg, #6d5ce8, #3b82f6)', unit: 'pts', C: BikeRunner },
+  { id: 'catch', name: 'Catch the Shoes', desc: 'Catch shoes, dodge bombs', icon: '\u{1F9FA}', grad: 'linear-gradient(135deg, #ec4899, #f59e0b)', unit: 'caught', C: CatchShoes },
+  { id: 'memory', name: 'Shoe Memory', desc: 'Match all eight pairs', icon: '\u{1F460}', grad: 'linear-gradient(135deg, #8b5cf6, #ec4899)', unit: 'moves', C: Memory },
+  { id: 'simon', name: 'Colour Sequence', desc: 'Repeat the growing pattern', icon: '\u{1F3B5}', grad: 'linear-gradient(135deg, #ef4444, #f59e0b)', unit: 'rounds', C: Simon },
+  { id: 'number', name: 'Number Memory', desc: 'Remember longer numbers', icon: '\u{1F522}', grad: 'linear-gradient(135deg, #0ea5e9, #10b981)', unit: 'digits', C: NumberMemory },
+  { id: 'stroop', name: 'Colour Match', desc: 'Word vs. ink colour', icon: '\u{1F3A8}', grad: 'linear-gradient(135deg, #f97316, #8b5cf6)', unit: 'pts', C: ColourMatch },
+  { id: 'maths', name: 'Quick Maths', desc: '60 seconds of sums', icon: '\u2795', grad: 'linear-gradient(135deg, #f59e0b, #ef4444)', unit: 'pts', C: QuickMaths },
+  { id: 'reaction', name: 'Reaction Test', desc: 'Tap the moment it turns green', icon: '\u26A1', grad: 'linear-gradient(135deg, #10b981, #0ea5e9)', unit: 'ms', C: Reaction },
+];
 
 const css = `
 .br-wrap { padding: 26px 30px 48px; background: #f6f6f9; min-height: 100%; box-sizing: border-box; }
-.br-inner { max-width: 1200px; margin: 0 auto; }
-.br-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
-.br-card { background: #fff; border: 1px solid #ecebf2; border-radius: 16px; overflow: hidden; }
-.br-head { padding: 14px 18px; color: #fff; font-weight: 700; display: flex; align-items: center; gap: 10px; }
-.br-head small { font-weight: 500; opacity: 0.85; margin-left: auto; font-size: 12px; }
-.br-body { padding: 16px 18px 18px; }
-.br-stats { display: flex; gap: 14px; font-size: 12.5px; color: #5b5870; margin-bottom: 12px; flex-wrap: wrap; }
-.br-stats b { color: #1d1b2c; font-family: var(--mono); }
-.mem { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.br-inner { max-width: 1100px; margin: 0 auto; }
+.br-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 14px; }
+.br-tile { border: 0; text-align: left; font: inherit; color: #fff; border-radius: 16px; padding: 18px; min-height: 130px; cursor: pointer; position: relative; overflow: hidden; box-shadow: 0 8px 22px rgba(20, 20, 40, 0.12); transition: transform 0.15s, box-shadow 0.15s; animation: br-in 0.35s ease-out both; }
+.br-tile:hover { transform: translateY(-3px) rotate(-0.4deg); box-shadow: 0 14px 30px rgba(20, 20, 40, 0.18); }
+.br-tile .ic { font-size: 34px; display: inline-block; animation: br-bob 3s ease-in-out infinite; }
+.br-tile .n { font-weight: 800; font-size: 16px; margin-top: 8px; }
+.br-tile .d { font-size: 12.5px; opacity: 0.9; margin-top: 2px; }
+.br-tile .b { position: absolute; top: 12px; right: 12px; font-size: 11px; font-weight: 700; background: rgba(255, 255, 255, 0.22); padding: 3px 8px; border-radius: 999px; }
+@keyframes br-bob { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-5px) rotate(-6deg); } }
+@keyframes br-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.br-panel { background: #fff; border: 1px solid #ecebf2; border-radius: 16px; overflow: hidden; animation: br-in 0.25s ease-out both; }
+.br-ph { display: flex; align-items: center; gap: 10px; padding: 14px 16px; color: #fff; font-weight: 800; font-size: 16px; }
+.br-ph button { border: 0; background: rgba(255, 255, 255, 0.22); color: #fff; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.br-pb { padding: 16px; }
+.g-stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: #5b5870; margin-bottom: 12px; }
+.g-stats b { color: #1d1b2c; font-family: var(--mono); }
+.g-btn { margin-top: 12px; }
+.g-win { text-align: center; padding: 10px 0 4px; font-weight: 700; color: #16713f; animation: br-in 0.3s ease-out; }
+.g-big { font-size: clamp(28px, 7vw, 40px); font-weight: 800; text-align: center; letter-spacing: -0.02em; margin: 10px 0 14px; font-family: var(--mono); padding: 6px; transition: background 0.12s; }
+.g-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.g-choices button { padding: 14px; border-radius: 12px; border: 1px solid #e4e2ee; background: #fff; font: inherit; font-size: 18px; font-weight: 700; cursor: pointer; font-family: var(--mono); transition: transform 0.08s, background 0.12s; }
+.g-choices button:active { transform: scale(0.97); }
+.g-choices button.ok { background: #e3f5ea; border-color: #9fd9b5; }
+.g-choices button.no { background: #fde8e6; border-color: #f3b0a8; }
+.g-pad { height: 200px; border-radius: 14px; display: flex; align-items: center; justify-content: center; text-align: center; font-weight: 800; font-size: 18px; cursor: pointer; user-select: none; transition: background 0.1s; padding: 12px; touch-action: manipulation; }
+.g-bar { height: 6px; background: #eeedf5; border-radius: 6px; overflow: hidden; }
+.g-bar div { height: 100%; background: linear-gradient(90deg, #6d5ce8, #3b82f6); animation: g-shrink linear forwards; }
+@keyframes g-shrink { from { width: 100%; } to { width: 0; } }
+.mem { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 460px; margin: 0 auto; }
 .mem button { aspect-ratio: 1; border: 0; padding: 0; background: none; perspective: 600px; cursor: pointer; }
 .mem .in { position: relative; width: 100%; height: 100%; transition: transform 0.35s; transform-style: preserve-3d; }
 .mem .flip .in { transform: rotateY(180deg); }
-.mem .f, .mem .b { position: absolute; inset: 0; border-radius: 10px; display: flex; align-items: center; justify-content: center; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-.mem .f { background: linear-gradient(135deg, #6d5ce8, #3b82f6); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.25); }
-.mem .f::after { content: "CS"; color: rgba(255,255,255,0.55); font-weight: 800; font-size: 12px; }
-.mem .b { background: #f4f3fb; transform: rotateY(180deg); font-size: 28px; }
+.mem .f, .mem .b { position: absolute; inset: 0; border-radius: 12px; display: flex; align-items: center; justify-content: center; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.mem .f { background: linear-gradient(135deg, #6d5ce8, #3b82f6); }
+.mem .f::after { content: "CS"; color: rgba(255, 255, 255, 0.55); font-weight: 800; font-size: 12px; }
+.mem .b { background: #f4f3fb; transform: rotateY(180deg); font-size: clamp(22px, 6vw, 30px); }
 .mem .done .b { background: #e3f5ea; }
-.qm-q { font-size: 34px; font-weight: 800; text-align: center; letter-spacing: -0.02em; margin: 8px 0 14px; font-family: var(--mono); }
-.qm-a { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.qm-a button { padding: 14px; border-radius: 10px; border: 1px solid #e4e2ee; background: #fff; font: inherit; font-size: 18px; font-weight: 700; cursor: pointer; font-family: var(--mono); transition: transform 0.08s, background 0.12s; }
-.qm-a button:active { transform: scale(0.97); }
-.qm-a button.ok { background: #e3f5ea; border-color: #9fd9b5; }
-.qm-a button.no { background: #fde8e6; border-color: #f3b0a8; }
-.rx { height: 170px; border-radius: 12px; display: flex; align-items: center; justify-content: center; text-align: center; font-weight: 700; font-size: 17px; cursor: pointer; user-select: none; transition: background 0.1s; padding: 12px; }
-.br-btn { margin-top: 12px; }
-@keyframes br-pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-.br-win { text-align: center; padding: 10px 0 4px; font-weight: 700; color: #16713f; animation: br-pop 0.3s ease-out; }
+.simon { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 320px; margin: 0 auto; }
+.simon button { aspect-ratio: 1; border: 0; border-radius: 18px; cursor: pointer; transition: opacity 0.12s, transform 0.12s; touch-action: manipulation; }
+@media (max-width: 700px) { .br-wrap { padding: 14px 12px 32px !important; } .br-tiles { grid-template-columns: 1fr 1fr; gap: 10px; } .br-tile { min-height: 116px; padding: 14px; } .br-tile .d { display: none; } }
+@media (prefers-reduced-motion: reduce) { .br-tile .ic { animation: none; } }
 `;
 
-const load = (k: string) => { try { return Number(localStorage.getItem('cs-best-' + k)) || 0; } catch { return 0; } };
-const save = (k: string, v: number) => { try { localStorage.setItem('cs-best-' + k, String(v)); } catch { /* ignore */ } };
-const FACES = ['\u{1F460}', '\u{1F45F}', '\u{1F97F}', '\u{1F462}', '\u{1F461}', '\u{1FA74}', '\u{1F45E}', '\u{1F9E6}'];
-
-function Memory() {
-  const [cards, setCards] = useState<string[]>([]);
-  const [open, setOpen] = useState<number[]>([]);
-  const [done, setDone] = useState<Set<number>>(new Set());
-  const [moves, setMoves] = useState(0);
-  const [best, setBest] = useState(0);
-  const deal = () => { setCards([...FACES, ...FACES].sort(() => Math.random() - 0.5)); setOpen([]); setDone(new Set()); setMoves(0); };
-  useEffect(() => { deal(); setBest(load('memory')); }, []);
-  const won = cards.length > 0 && done.size === cards.length;
-  useEffect(() => { if (won && (!best || moves < best)) { save('memory', moves); setBest(moves); } }, [won]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function flip(i: number) {
-    if (open.length === 2 || open.includes(i) || done.has(i)) return;
-    const n = [...open, i];
-    setOpen(n);
-    if (n.length === 2) {
-      setMoves((m) => m + 1);
-      if (cards[n[0]] === cards[n[1]]) setTimeout(() => { setDone((d) => new Set([...d, n[0], n[1]])); setOpen([]); }, 350);
-      else setTimeout(() => setOpen([]), 800);
-    }
-  }
-
-  return (
-    <div className="br-card">
-      <div className="br-head" style={{ background: 'linear-gradient(120deg, #6d5ce8, #3b82f6)' }}>Shoe Memory <small>match all 8 pairs</small></div>
-      <div className="br-body">
-        <div className="br-stats"><span>Moves <b>{moves}</b></span><span>Best <b>{best || '—'}</b></span></div>
-        <div className="mem">
-          {cards.map((f, i) => (
-            <button key={i} className={`${open.includes(i) || done.has(i) ? 'flip' : ''} ${done.has(i) ? 'done' : ''}`} onClick={() => flip(i)} aria-label="card">
-              <div className="in"><div className="f" /><div className="b">{f}</div></div>
-            </button>
-          ))}
-        </div>
-        {won && <div className="br-win">All pairs in {moves} moves{moves === best ? ' — new best!' : ''}</div>}
-        <button className="btn br-btn" onClick={deal}>New game</button>
-      </div>
-    </div>
-  );
-}
-
-type Q = { text: string; ans: number; choices: number[] };
-function makeQ(): Q {
-  const op = ['+', '−', '×'][Math.floor(Math.random() * 3)];
-  let a = 2 + Math.floor(Math.random() * 40), b = 2 + Math.floor(Math.random() * 40);
-  if (op === '×') { a = 2 + Math.floor(Math.random() * 11); b = 2 + Math.floor(Math.random() * 11); }
-  if (op === '−' && b > a) [a, b] = [b, a];
-  const ans = op === '+' ? a + b : op === '−' ? a - b : a * b;
-  const set = new Set([ans]);
-  while (set.size < 4) set.add(ans + (Math.floor(Math.random() * 11) - 5 || 7));
-  return { text: `${a} ${op} ${b}`, ans, choices: [...set].sort(() => Math.random() - 0.5) };
-}
-
-function QuickMaths() {
-  const [left, setLeft] = useState(0);
-  const [q, setQ] = useState<Q | null>(null);
-  const [score, setScore] = useState(0);
-  const [best, setBest] = useState(0);
-  const [flash, setFlash] = useState<{ v: number; ok: boolean } | null>(null);
-  useEffect(() => { setBest(load('maths')); }, []);
-  useEffect(() => {
-    if (left <= 0) return;
-    const t = setTimeout(() => setLeft((s) => s - 1), 1000);
-    return () => clearTimeout(t);
-  }, [left]);
-  useEffect(() => { if (left === 0 && q && score > best) { save('maths', score); setBest(score); } }, [left]); // eslint-disable-line react-hooks/exhaustive-deps
-  const start = () => { setScore(0); setLeft(60); setQ(makeQ()); setFlash(null); };
-  function pick(v: number) {
-    if (!q || left <= 0) return;
-    const ok = v === q.ans;
-    setFlash({ v, ok });
-    if (ok) setScore((s) => s + 1);
-    setTimeout(() => { setFlash(null); setQ(makeQ()); }, ok ? 150 : 450);
-  }
-  return (
-    <div className="br-card">
-      <div className="br-head" style={{ background: 'linear-gradient(120deg, #f59e0b, #ec4899)' }}>Quick Maths <small>60 seconds</small></div>
-      <div className="br-body">
-        <div className="br-stats"><span>Time <b>{left}s</b></span><span>Score <b>{score}</b></span><span>Best <b>{best || '—'}</b></span></div>
-        {left > 0 && q ? (
-          <>
-            <div className="qm-q">{q.text}</div>
-            <div className="qm-a">{q.choices.map((c) => <button key={c} className={flash?.v === c ? (flash.ok ? 'ok' : 'no') : ''} onClick={() => pick(c)}>{c}</button>)}</div>
-          </>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '18px 0' }}>
-            {q && <div className="br-win" style={{ color: '#8a5a00' }}>{score} correct{score >= best && score > 0 ? ' — new best!' : ''}</div>}
-            <button className="btn primary br-btn" onClick={start}>{q ? 'Play again' : 'Start'}</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Reaction() {
-  const [state, setState] = useState<'idle' | 'wait' | 'go' | 'result' | 'early'>('idle');
-  const [ms, setMs] = useState(0);
-  const [best, setBest] = useState(0);
-  const t0 = useRef(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => { setBest(load('reaction')); return () => { if (timer.current) clearTimeout(timer.current); }; }, []);
-  function click() {
-    if (state === 'idle' || state === 'result' || state === 'early') {
-      setState('wait');
-      timer.current = setTimeout(() => { t0.current = performance.now(); setState('go'); }, 1500 + Math.random() * 2500);
-    } else if (state === 'wait') {
-      if (timer.current) clearTimeout(timer.current);
-      setState('early');
-    } else if (state === 'go') {
-      const r = Math.round(performance.now() - t0.current);
-      setMs(r); setState('result');
-      if (!best || r < best) { save('reaction', r); setBest(r); }
-    }
-  }
-  const look = { idle: ['#eef1f5', '#3d4a5c', 'Tap to start'], wait: ['#fde8e6', '#b42318', 'Wait for green…'], go: ['#10b981', '#fff', 'TAP!'], result: ['#e6effc', '#1f5fbf', `${ms} ms — tap to try again`], early: ['#fdf1dc', '#8a5a00', 'Too soon! Tap to try again'] }[state];
-  return (
-    <div className="br-card">
-      <div className="br-head" style={{ background: 'linear-gradient(120deg, #10b981, #0ea5e9)' }}>Reaction test <small>tap on green</small></div>
-      <div className="br-body">
-        <div className="br-stats"><span>Last <b>{ms ? `${ms} ms` : '—'}</b></span><span>Best <b>{best ? `${best} ms` : '—'}</b></span></div>
-        <div className="rx" style={{ background: look[0], color: look[1] }} onClick={click} role="button">{look[2]}</div>
-      </div>
-    </div>
-  );
-}
-
 export default function BreakRoom() {
+  const [open, setOpen] = useState<Game | null>(null);
+  const [bests, setBests] = useState<Record<string, number>>({});
+  useEffect(() => { if (!open) setBests(Object.fromEntries(GAMES.map((g) => [g.id, loadBest(g.id)]))); }, [open]);
   return (
     <main className="shell" style={{ gridTemplateColumns: 'var(--rail) minmax(0, 1fr)' }}>
       <Rail />
       <section className="br-wrap" style={{ overflowY: 'auto', minWidth: 0 }}>
         <style>{css}</style>
         <div className="br-inner">
-          <h2 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>Break room {'\u2615'}</h2>
-          <p className="status-line" style={{ marginBottom: 18 }}>A few minutes off. Everything here runs in your browser — nothing is sent anywhere, and best scores stay on this device.</p>
-          <div className="br-grid"><Memory /><QuickMaths /><Reaction /></div>
+          <h2 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 4px' }}>Break room {'\u2615'}</h2>
+          <p className="status-line" style={{ marginBottom: 18 }}>A few minutes off. Everything runs in your browser — nothing is sent anywhere, and best scores stay on this device.</p>
+          {open ? (
+            <div className="br-panel">
+              <div className="br-ph" style={{ background: open.grad }}>
+                <button onClick={() => setOpen(null)}><ArrowLeft size={14} /> All games</button>
+                <span>{open.icon} {open.name}</span>
+              </div>
+              <div className="br-pb"><open.C /></div>
+            </div>
+          ) : (
+            <div className="br-tiles">
+              {GAMES.map((g, i) => (
+                <button key={g.id} className="br-tile" style={{ background: g.grad, animationDelay: `${i * 40}ms` }} onClick={() => setOpen(g)}>
+                  {bests[g.id] ? <span className="b">Best {bests[g.id]} {g.unit}</span> : null}
+                  <span className="ic" style={{ animationDelay: `${i * 0.3}s` }}>{g.icon}</span>
+                  <div className="n">{g.name}</div>
+                  <div className="d">{g.desc}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </main>

@@ -45,6 +45,7 @@ const css = `
 .ov-li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 18px; border-bottom: 1px solid #f4f3f8; font-size: 12.5px; }
 .ov-li:last-child { border-bottom: 0; }
 .ov-pill { display: inline-flex; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+@media (max-width: 700px) { .ov-wrap { padding: 14px 12px 32px !important; } .ov-hero { padding: 18px; border-radius: 14px; } .ov-hero h1 { font-size: 20px; } .ov-stats { grid-template-columns: 1fr 1fr; gap: 10px; } .ov-stat { padding: 12px; gap: 8px; flex-direction: column; align-items: flex-start; } .ov-n { font-size: 22px; } .ov-mk { grid-template-columns: 1fr; padding: 12px; } .ov-li { padding: 10px 12px; flex-wrap: wrap; } }
 `;
 
 const greet = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; };
