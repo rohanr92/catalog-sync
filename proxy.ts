@@ -46,7 +46,12 @@ export async function proxy(req: NextRequest) {
 
   if (isApi && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
     const origin = req.headers.get('origin');
-    if (origin && origin !== req.nextUrl.origin) return deny(403, 'Cross-site request refused');
+    if (origin) {
+      const host = (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? req.nextUrl.host).split(",")[0].trim();
+      let originHost = "";
+      try { originHost = new URL(origin).host; } catch { /* malformed origin */ }
+      if (originHost !== host) return deny(403, "Cross-site request refused");
+    }
     if (role === 'viewer' && !pathname.startsWith('/api/auth/')) return deny(403, 'Viewers cannot make changes');
     if (ADMIN_ONLY.some((r) => r.test(pathname)) && rank[role] < rank.admin) return deny(403, 'Only an owner or admin can change this');
   }
