@@ -7,6 +7,7 @@ import { imageSpecs } from '@/lib/image-specs';
 import { channelColumns } from '@/lib/channel-specs';
 import Spinner from './Spinner';
 import ImageGuide from "./ImageGuide";
+import SourceImageRows, { SOURCE_DRAG_TYPE } from './SourceImageRows';
 
 interface Props {
   group: Group;
@@ -199,6 +200,12 @@ export default function ImagePanel({ group, channelKey, channelName, otherChanne
     setBusy(null);
   }
 
+  function placeFromSource(i: number, url: string) {
+    replaceAt(i, url);
+    setPicked(new Set([i]));
+    toast.success(`Slot ${i + 1} replaced — it's ticked, press "Edit 1 selected in Image Studio" to resize it`);
+  }
+
   function move(from: number, to: number) {
     if (from === to) return;
     setSlots((prev) => { const n = [...prev]; const [it] = n.splice(from, 1); n.splice(to, 0, it); return n; });
@@ -272,7 +279,7 @@ export default function ImagePanel({ group, channelKey, channelName, otherChanne
                 {slots.map((url, i) => (
                   <div key={i} className={`ip-tile${url ? '' : ' empty'}${picked.has(i) ? ' sel' : ''}`}
                     draggable={!!url} onDragStart={() => (dragFrom.current = i)} onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => { if (dragFrom.current != null) move(dragFrom.current, i); dragFrom.current = null; }}>
+                    onDrop={(e) => { const src = e.dataTransfer.getData(SOURCE_DRAG_TYPE); if (src) { e.preventDefault(); dragFrom.current = null; placeFromSource(i, src); return; } if (dragFrom.current != null) move(dragFrom.current, i); dragFrom.current = null; }}>
                     <div className="ip-top">
                       {url && <input type="checkbox" checked={picked.has(i)} onChange={(e) => setPicked((p) => { const n = new Set(p); if (e.target.checked) n.add(i); else n.delete(i); return n; })} />}
                       <span className="ip-num">{i + 1}</span>
@@ -298,6 +305,8 @@ export default function ImagePanel({ group, channelKey, channelName, otherChanne
               </div>
               <input ref={fileInput} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) addFileToSlot(fileFor.current, f); e.target.value = ''; }} />
               <p className="status-line" style={{ marginTop: 10 }}>Click an image to select it. Drag a tile onto another slot to reorder. Slot 1 is the primary image; each slot is that image column in {channelName}&apos;s sheet, for every size of {group.color}.</p>
+
+              <SourceImageRows group={group} channelKey={channelKey} slotCount={slots.length} onPlace={placeFromSource} />
 
               {hasSwatchColumn && (
                 <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--rule)', display: 'flex', gap: 14, alignItems: 'center' }}>

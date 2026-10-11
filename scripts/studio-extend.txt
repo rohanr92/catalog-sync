@@ -1,0 +1,256 @@
+@@@FIND 0
+  .guide-toggle.on .dot{background:var(--accent)}
+@@@WITH 0
+  .guide-toggle.on .dot{background:var(--accent)}
+  #bgMode button,#dBgMode button,#extPlace button,#dExtPlace button{flex:1 1 0;min-width:0;padding:7px 4px;white-space:nowrap;font-size:12px}
+  .cell .xflag{position:absolute;top:7px;left:34px;background:#b5651d;color:#fff;font-size:10px;font-weight:600;padding:3px 7px;border-radius:6px;pointer-events:none}
+  .ext-warn{font-size:11px;line-height:1.5;margin-top:8px;padding:7px 9px;border-radius:7px;background:#fbefe3;color:#8a4a12;display:none}
+@@@FIND 1
+          <button data-bg="gradient">Gradient</button>
+          <button data-bg="transparent">None</button>
+@@@WITH 1
+          <button data-bg="gradient">Gradient</button>
+          <button data-bg="transparent">None</button>
+          <button data-bg="extend">Extend</button>
+        </div>
+        <div id="bgExtendArea" style="margin-top:12px;display:none">
+          <label style="font-size:12px;font-weight:500;display:block;margin-bottom:6px">New background goes</label>
+          <div class="seg" id="extPlace">
+            <button data-p="left">Left only</button>
+            <button data-p="center" class="on">Both sides</button>
+            <button data-p="right">Right only</button>
+          </div>
+          <div class="field" style="margin-top:12px"><label>Edge blend · <span id="extBlendVal">50</span>%</label><input type="range" class="slider" id="extBlend" min="0" max="100" value="50"></div>
+          <button class="btn sm primary" id="extAll" style="width:100%">Extend all images</button>
+          <div class="hint">Each photo is scaled to fit the canvas (nothing cropped) and its own studio background is continued out to the edges. The product and model are never changed. Lower <b>Edge blend</b> if slivers get copied from the photo edge. Tiles marked <b>⚠ edge</b> have the model or garment touching the photo edge &mdash; use <b>Left only / Right only</b> so that side stays the frame edge, or open the tile to check it.</div>
+@@@FIND 2
+            <button data-bg="transparent">None</button>
+@@@WITH 2
+            <button data-bg="transparent">None</button>
+            <button data-bg="extend">Extend</button>
+          </div>
+          <div id="dExtendArea" style="display:none;margin-top:10px">
+            <label style="font-size:12px;font-weight:500;display:block;margin-bottom:6px">New background goes</label>
+            <div class="seg" id="dExtPlace">
+              <button data-p="left">Left only</button>
+              <button data-p="center" class="on">Both sides</button>
+              <button data-p="right">Right only</button>
+            </div>
+            <div class="field" style="margin-top:10px"><label>Edge blend · <span id="dExtBlendVal">50</span>%</label><input type="range" class="slider" id="dExtBlend" min="0" max="100" value="50"></div>
+            <div class="ext-warn" id="dExtWarn">The model or garment touches the photo edge here, so the background can't continue it. Try <b>Left only</b> or <b>Right only</b> so that edge stays the frame edge.</div>
+            <div class="small-note">Your photo is never changed &mdash; only the new area around it. With Extend on, the <b>magic eraser</b> fills whatever you erase with the surrounding background (great for stray slivers).</div>
+@@@FIND 3
+  c.drawImage(rec.erased?erasedCanvas(rec):rec.img, -dw/2, -dh/2, dw, dh);
+  c.restore();
+@@@WITH 3
+  c.drawImage(rec.erased?erasedCanvas(rec):rec.img, -dw/2, -dh/2, dw, dh);
+  c.restore();
+  if(rec.bg.mode==='extend') extendFill(c,rec,W,H,cx,cy,dw,dh,swap);
+}
+
+/* ===== EXTEND BACKGROUND =====
+   Continues the photo's own studio background out to the canvas edges.
+   The photo pixels are never changed; only the empty area around it is filled. */
+function _xrng(seed){let a=(seed>>>0)||1;return()=>{a=(a+0x6D2B79F5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
+function _xg(r){return (r()+r()+r()-1.5)*2;}
+function _xmed(a){a.sort((p,q)=>p-q);return a.length?a[a.length>>1]:0;}
+function placeForExtend(rec,where){
+  const rot=((rec.transform.rot||0)%360+360)%360, swap=rot===90||rot===270;
+  const iw=swap?rec.h:rec.w, ih=swap?rec.w:rec.h;
+  const s=Math.min(state.canvasW/iw,state.canvasH/ih);
+  rec.transform.scale=s;
+  const exW=state.canvasW-iw*s, exH=state.canvasH-ih*s;
+  let x=0,y=0;
+  if(exW>=exH){ if(where==='left')x=exW/2; else if(where==='right')x=-exW/2; }
+  else { if(where==='left')y=exH/2; else if(where==='right')y=-exH/2; }
+  rec.transform.x=x; rec.transform.y=y;
+  rec.bg.mode='extend'; rec.bg.place=where; if(rec.bg.blend==null) rec.bg.blend=50;
+}
+function extendFill(c,rec,W,H,cx,cy,dw,dh,swap){
+  const iw=swap?dh:dw, ih=swap?dw:dh;
+  const r={x0:Math.max(0,Math.ceil(cx-iw/2)),y0:Math.max(0,Math.ceil(cy-ih/2)),x1:Math.min(W,Math.floor(cx+iw/2)),y1:Math.min(H,Math.floor(cy+ih/2))};
+  if(r.x1-r.x0<6||r.y1-r.y0<6) return;
+  let id; try{ id=c.getImageData(0,0,W,H); }catch(e){ return; }
+  const d=id.data, blend=Math.max(0,Math.min(1,(rec.bg.blend==null?50:rec.bg.blend)/100)), rnd=_xrng(rec.id*7919+W*31+H);
+  let busy=_extAxis(d,W,H,r,true,blend,rnd);
+  busy=Math.max(busy,_extAxis(d,W,H,{x0:0,y0:r.y0,x1:W,y1:r.y1},false,blend,rnd));
+  _fillHoles(d,W,H,r,rnd);
+  c.putImageData(id,0,0);
+  rec._extBusy=busy;
+}
+function _extAxis(d,W,H,r,hor,blend,rnd){
+  const L=hor?r.y1-r.y0:r.x1-r.x0, off=hor?r.y0:r.x0;
+  const a0=hor?r.x0:r.y0, a1=hor?r.x1:r.y1, A=hor?W:H;
+  if((a0<=0&&a1>=A)||L<4) return 0;
+  const P=hor?((l,p)=>((off+l)*W+p)*4):((l,p)=>(p*W+off+l)*4);
+  const span=a1-a0, k=Math.max(3,Math.round(span*0.02)), f0=Math.max(6,Math.round(span*0.03));
+  let busyMax=0;
+  for(const low of [true,false]){
+    const depth=low?a0:A-a1; if(depth<=0) continue;
+    const sStart=low?Math.min(a1-2,a0+1):Math.max(a0,a1-2-k), sEnd=Math.max(sStart+1,Math.min(sStart+k,a1-1));
+    const med=new Float32Array(L*3), sd=new Float32Array(L), t0=[],t1=[],t2=[];
+    for(let l=0;l<L;l++){
+      t0.length=t1.length=t2.length=0;
+      for(let p=sStart;p<sEnd;p++){const i=P(l,p);t0.push(d[i]);t1.push(d[i+1]);t2.push(d[i+2]);}
+      let s=0;
+      [t0,t1,t2].forEach((a,ch)=>{let m=0;for(const v of a)m+=v;m/=a.length;let q=0;for(const v of a)q+=(v-m)*(v-m);s+=Math.sqrt(q/a.length);med[l*3+ch]=_xmed(a);});
+      sd[l]=s/3;
+    }
+    // rows where the model/garment reaches the photo edge: don't smear them outward
+    const win=Math.max(5,Math.round(L*0.2))|1, h2=win>>1, st=Math.max(1,Math.floor(win/60));
+    const glob=[0,1,2].map(ch=>{const a=[];for(let l=0;l<L;l++)a.push(med[l*3+ch]);return _xmed(a);});
+    const intr=new Uint8Array(L);
+    for(let l=0;l<L;l++){
+      let dev=0,far=0;
+      for(let ch=0;ch<3;ch++){
+        const a=[];for(let j=l-h2;j<=l+h2;j+=st){const jj=j<0?0:j>=L?L-1:j;a.push(med[jj*3+ch]);}
+        const t=_xmed(a), v=med[l*3+ch]; dev=Math.max(dev,Math.abs(v-t)); far=Math.max(far,Math.abs(v-glob[ch]));
+      }
+      if(dev>14||far>45||sd[l]>14) intr[l]=1;
+    }
+    const g=Math.max(2,Math.round(L/400)), bad=new Uint8Array(L);
+    for(let l=0;l<L;l++) if(intr[l]) for(let j=Math.max(0,l-g);j<=Math.min(L-1,l+g);j++) bad[j]=1;
+    let nb=0; for(let l=0;l<L;l++) nb+=bad[l]; busyMax=Math.max(busyMax,nb/L);
+    if(nb>0&&nb<L){
+      let prev=-1;
+      for(let l=0;l<=L;l++){
+        if(l<L&&bad[l]) continue;
+        for(let j=prev+1;j<l;j++) for(let ch=0;ch<3;ch++){
+          const a=prev>=0?med[prev*3+ch]:med[l*3+ch], b=l<L?med[l*3+ch]:a, t=(prev>=0&&l<L)?(j-prev)/(l-prev):0;
+          med[j*3+ch]=a+(b-a)*t;
+        }
+        prev=l;
+      }
+    }
+    const sig=Math.max(1.5,L*0.004), R=Math.ceil(sig*3), ker=[]; let ks=0;
+    for(let j=-R;j<=R;j++){const v=Math.exp(-j*j/(2*sig*sig));ker.push(v);ks+=v;}
+    const sm=new Float32Array(L*3);
+    for(let l=0;l<L;l++) for(let ch=0;ch<3;ch++){let s=0;for(let j=-R;j<=R;j++){const jj=Math.min(L-1,Math.max(0,l+j));s+=med[jj*3+ch]*ker[j+R];}sm[l*3+ch]=s/ks;}
+    const res=[], rs=Math.max(1,Math.floor(L/300));
+    for(let l=0;l<L;l+=rs){ if(bad[l]) continue; for(let p=sStart;p<sEnd;p++){const i=P(l,p);res.push(Math.abs(d[i+1]-sm[l*3+1]));} }
+    const grain=Math.min(6,Math.max(0.3,_xmed(res)*1.4826));
+    const f=Math.max(1,Math.min(f0,depth,span-2));
+    for(let l=0;l<L;l++){
+      const calm=bad[l]?0:Math.max(0,Math.min(1,1-(sd[l]-6)/20)), wm=calm*Math.min(1,blend*2);
+      for(let q=0;q<depth;q++){
+        const pos=low?a0-1-q:a1+q, i=P(l,pos), n=_xg(rnd)*grain;
+        let R0=sm[l*3]+n, G0=sm[l*3+1]+n, B0=sm[l*3+2]+n;
+        if(q<f&&wm>0){
+          const w=(1-q/f)*wm, mp=Math.min(a1-1,Math.max(a0,low?a0+1+q:a1-2-q)), j=P(l,mp);
+          R0=R0*(1-w)+d[j]*w; G0=G0*(1-w)+d[j+1]*w; B0=B0*(1-w)+d[j+2]*w;
+        }
+        const al=d[i+3]/255;
+        d[i]=R0*(1-al)+d[i]*al; d[i+1]=G0*(1-al)+d[i+1]*al; d[i+2]=B0*(1-al)+d[i+2]*al; d[i+3]=255;
+      }
+    }
+  }
+  return busyMax;
+}
+/* anything erased inside the photo (magic eraser) is filled with the surrounding background */
+function _boxAvg(src,w,h,rad,out){
+  const ii=new Float64Array((w+1)*(h+1));
+  for(let y=0;y<h;y++){let row=0;for(let x=0;x<w;x++){row+=src[y*w+x];ii[(y+1)*(w+1)+x+1]=ii[y*(w+1)+x+1]+row;}}
+  for(let y=0;y<h;y++){const ya=Math.max(0,y-rad),yb=Math.min(h,y+rad+1);
+    for(let x=0;x<w;x++){const xa=Math.max(0,x-rad),xb=Math.min(w,x+rad+1);
+      out[y*w+x]=(ii[yb*(w+1)+xb]-ii[ya*(w+1)+xb]-ii[yb*(w+1)+xa]+ii[ya*(w+1)+xa])/((yb-ya)*(xb-xa));}}
+}
+function _fillHoles(d,W,H,r,rnd){
+  let x0=W,y0=H,x1=-1,y1=-1,cnt=0;
+  for(let y=r.y0;y<r.y1;y++) for(let x=r.x0;x<r.x1;x++){ if(d[(y*W+x)*4+3]<250){cnt++;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;} }
+  if(x1<0) return;
+  if(cnt>(r.x1-r.x0)*(r.y1-r.y0)*0.25) return;   // background was removed on purpose - leave it
+  const pad=Math.max(8,Math.round(Math.min(W,H)*0.03));
+  x0=Math.max(0,x0-pad); y0=Math.max(0,y0-pad); x1=Math.min(W-1,x1+pad); y1=Math.min(H-1,y1+pad);
+  const bw=x1-x0+1, bh=y1-y0+1, n=bw*bh, mk=new Uint8Array(n), ch=[new Float32Array(n),new Float32Array(n),new Float32Array(n)], tmp=new Float32Array(n);
+  for(let y=0;y<bh;y++){ let s=[0,0,0],c2=0;
+    for(let x=0;x<bw;x++){const i=((y0+y)*W+x0+x)*4,k=y*bw+x; for(let c=0;c<3;c++)ch[c][k]=d[i+c]; if(d[i+3]<250)mk[k]=1; else {s[0]+=d[i];s[1]+=d[i+1];s[2]+=d[i+2];c2++;}}
+    for(let x=0;x<bw;x++){const k=y*bw+x; if(mk[k]&&c2) for(let c=0;c<3;c++) ch[c][k]=s[c]/c2;} }
+  const big=Math.max(3,Math.round(Math.min(bw,bh)/12));
+  for(const [rad,it] of [[big,5],[Math.max(2,big>>2),8],[1,10]]) for(let t=0;t<it;t++) for(let c=0;c<3;c++){ _boxAvg(ch[c],bw,bh,rad,tmp); for(let k=0;k<n;k++) if(mk[k]) ch[c][k]=tmp[k]; }
+  for(let y=0;y<bh;y++) for(let x=0;x<bw;x++){ const k=y*bw+x; if(!mk[k]) continue; const i=((y0+y)*W+x0+x)*4, al=d[i+3]/255, nz=_xg(rnd)*1.2;
+    for(let c=0;c<3;c++) d[i+c]=(ch[c][k]+nz)*(1-al)+d[i+c]*al; d[i+3]=255; }
+}
+function markExt(cell,rec){
+  let fl=cell.querySelector('.xflag');
+  const show=rec.bg.mode==='extend'&&(rec._extBusy||0)>0.005;
+  if(show&&!fl){ fl=document.createElement('div'); fl.className='xflag'; fl.textContent='⚠ edge'; fl.title='Model or garment touches the photo edge - check this one'; cell.appendChild(fl); }
+  if(!show&&fl) fl.remove();
+}
+function syncExtControls(rec){
+  const p=rec.bg.place||'center', b=rec.bg.blend==null?50:rec.bg.blend;
+  document.querySelectorAll('#extPlace button').forEach(x=>x.classList.toggle('on',x.dataset.p===p));
+  $('extBlend').value=b; $('extBlendVal').textContent=b;
+}
+function syncDExtControls(){
+  if(!dRec) return;
+  const p=dRec.bg.place||'center', b=dRec.bg.blend==null?50:dRec.bg.blend;
+  document.querySelectorAll('#dExtPlace button').forEach(x=>x.classList.toggle('on',x.dataset.p===p));
+  $('dExtBlend').value=b; $('dExtBlendVal').textContent=b;
+@@@FIND 4
+    if(state.gridGuides) drawGuides(cvn.getContext('2d'),cw,ch,1);
+    cell.appendChild(cvn);
+@@@WITH 4
+    if(state.gridGuides) drawGuides(cvn.getContext('2d'),cw,ch,1);
+    cell.appendChild(cvn);
+    markExt(cell,rec);
+@@@FIND 5
+  document.querySelectorAll('#bgMode button').forEach(b=>b.classList.toggle('on',b.dataset.bg===rec.bg.mode));
+  updateBgAreas(rec.bg.mode);
+@@@WITH 5
+  document.querySelectorAll('#bgMode button').forEach(b=>b.classList.toggle('on',b.dataset.bg===rec.bg.mode));
+  updateBgAreas(rec.bg.mode); syncExtControls(rec);
+@@@FIND 6
+function updateBgAreas(mode){
+  $('bgColorArea').style.display=(mode==='gradient')?'none':'block';
+@@@WITH 6
+function updateBgAreas(mode){
+  $('bgExtendArea').style.display=(mode==='extend')?'block':'none';
+  $('bgColorArea').style.display=(mode==='gradient'||mode==='extend')?'none':'block';
+@@@FIND 7
+      if(state.gridGuides) drawGuides(cvn.getContext('2d'),cvn.width,cvn.height,1);
+@@@WITH 7
+      if(state.gridGuides) drawGuides(cvn.getContext('2d'),cvn.width,cvn.height,1);
+      markExt(c,rec);
+@@@FIND 8
+function buildSwatches(){const s=$('swatches');s.innerHTML='';SWATCHES.forEach(c=>{const d=document.createElement('div');d.className='sw';d.style.background=c;d.title=c;d.onclick=()=>{$('bgColor').value=c;$('bgHex').value=c.toUpperCase();applyToSel(r=>{r.bg.mode='solid';r.bg.color=c;});document.querySelectorAll('#bgMode button').forEach(b=>b.classList.toggle('on',b.dataset.bg==='solid'));updateBgAreas('solid');};s.appendChild(d);});}
+document.querySelectorAll('#bgMode button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#bgMode button').forEach(x=>x.classList.toggle('on',x===b));updateBgAreas(b.dataset.bg);const sel0=selected()[0];if(b.dataset.bg==='gradient'&&sel0)renderGradStops(sel0);applyToSel(r=>r.bg.mode=b.dataset.bg);});
+@@@WITH 8
+function buildSwatches(){const s=$('swatches');s.innerHTML='';SWATCHES.forEach(c=>{const d=document.createElement('div');d.className='sw';d.style.background=c;d.title=c;d.onclick=()=>{$('bgColor').value=c;$('bgHex').value=c.toUpperCase();applyToSel(r=>{r.bg.mode='solid';r.bg.color=c;});document.querySelectorAll('#bgMode button').forEach(b=>b.classList.toggle('on',b.dataset.bg==='solid'));updateBgAreas('solid');};s.appendChild(d);});}
+document.querySelectorAll('#bgMode button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#bgMode button').forEach(x=>x.classList.toggle('on',x===b));updateBgAreas(b.dataset.bg);const sel0=selected()[0];if(b.dataset.bg==='gradient'&&sel0)renderGradStops(sel0);applyToSel(r=>{ if(b.dataset.bg==='extend') placeForExtend(r,r.bg.place||'center'); else r.bg.mode=b.dataset.bg; }); if(b.dataset.bg==='extend'&&selected()[0]) loadControlsFrom(selected()[0]);});
+document.querySelectorAll('#extPlace button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#extPlace button').forEach(x=>x.classList.toggle('on',x===b)); applyToSel(r=>placeForExtend(r,b.dataset.p)); if(selected()[0]) loadControlsFrom(selected()[0]); });
+$('extBlend').oninput=e=>{ $('extBlendVal').textContent=e.target.value; applyToSel(r=>{ if(r.bg.mode!=='extend') placeForExtend(r,r.bg.place||'center'); r.bg.blend=+e.target.value; }); };
+$('extAll').onclick=()=>{ if(!state.images.length) return; const p=(document.querySelector('#extPlace button.on')||{dataset:{p:'center'}}).dataset.p, bl=+$('extBlend').value;
+  state.images.forEach(r=>{ placeForExtend(r,p); r.bg.blend=bl; }); renderGrid(); refreshSelection();
+  const n=state.images.filter(r=>(r._extBusy||0)>0.005).length;
+  if(typeof showToast==='function') showToast('Extended '+state.images.length+' image'+(state.images.length!==1?'s':'')+(n?(' — '+n+' marked ⚠ edge, check those'):''),null,null,4000); };
+@@@FIND 9
+  document.querySelectorAll('#dBgMode button').forEach(b=>b.classList.toggle('on',b.dataset.bg===dRec.bg.mode));
+  updateDBgAreas(dRec.bg.mode);
+@@@WITH 9
+  document.querySelectorAll('#dBgMode button').forEach(b=>b.classList.toggle('on',b.dataset.bg===dRec.bg.mode));
+  updateDBgAreas(dRec.bg.mode); syncDExtControls();
+@@@FIND 10
+  renderTo(dctx,dRec,dcv.width,dcv.height);
+@@@WITH 10
+  renderTo(dctx,dRec,dcv.width,dcv.height);
+  if($('dExtWarn')) $('dExtWarn').style.display=(dRec.bg.mode==='extend'&&(dRec._extBusy||0)>0.005)?'block':'none';
+@@@FIND 11
+function updateDBgAreas(mode){
+  $('dBgColorArea').style.display=(mode==='gradient')?'none':'flex';
+@@@WITH 11
+function updateDBgAreas(mode){
+  $('dExtendArea').style.display=(mode==='extend')?'block':'none';
+  $('dBgColorArea').style.display=(mode==='gradient'||mode==='extend')?'none':'flex';
+@@@FIND 12
+  dRec.bg.mode=b.dataset.bg; updateDBgAreas(b.dataset.bg);
+@@@WITH 12
+  dRec.bg.mode=b.dataset.bg; updateDBgAreas(b.dataset.bg);
+  if(b.dataset.bg==='extend'){ placeForExtend(dRec,dRec.bg.place||'center'); syncDExtControls(); $('dScale').value=Math.round(dRec.transform.scale/fitScale(dRec)*100); $('dScaleVal').textContent=$('dScale').value; }
+@@@FIND 13
+$('dBgHex').onchange=e=>{let v=e.target.value.trim();if(!v.startsWith('#'))v='#'+v;if(/^#[0-9a-fA-F]{6}$/.test(v)){dRec.bg.mode='solid';dRec.bg.color=v;$('dBgColor').value=v;drawDetail();}};
+@@@WITH 13
+$('dBgHex').onchange=e=>{let v=e.target.value.trim();if(!v.startsWith('#'))v='#'+v;if(/^#[0-9a-fA-F]{6}$/.test(v)){dRec.bg.mode='solid';dRec.bg.color=v;$('dBgColor').value=v;drawDetail();}};
+document.querySelectorAll('#dExtPlace button').forEach(b=>b.onclick=()=>{ pushHistory(false); placeForExtend(dRec,b.dataset.p); syncDExtControls(); $('dScale').value=Math.round(dRec.transform.scale/fitScale(dRec)*100); $('dScaleVal').textContent=$('dScale').value; drawDetail(); });
+$('dExtBlend').addEventListener('pointerdown',()=>{ if($('detailBg').classList.contains('show')) pushHistory(false); });
+$('dExtBlend').oninput=e=>{ $('dExtBlendVal').textContent=e.target.value; dRec.bg.blend=+e.target.value; drawDetail(); };
+@@@END
