@@ -11,19 +11,18 @@ interface Row { key: string; styleCode: string; color: string; title: string; th
 interface Sum { name: string; counts: Partial<Record<Stage, number>>; stuck: number; offersPulled: boolean }
 interface Data { channels: string[]; summary: Record<string, Sum>; total: number; page: number; per: number; rows: Row[]; error?: string }
 
-const STAGES: { key: Stage; label: string; color: string }[] = [
-  { key: 'not_started', label: 'Not started', color: '#c9c9c9' },
-  { key: 'ignored', label: 'Ignored', color: '#9e9e9e' },
-  { key: 'queue', label: 'In queue', color: '#3b82f6' },
-  { key: 'approved', label: 'Approved', color: '#6d5ce8' },
-  { key: 'sent', label: 'Sent — processing', color: '#9b59d0' },
-  { key: 'accepted', label: 'Accepted — no offer yet', color: '#0f9b8e' },
-  { key: 'rejected', label: 'Rejected', color: '#e5484d' },
-  { key: 'listed', label: 'In catalogue — no offer', color: '#14b8a6' },
-  { key: 'oos', label: 'Live — 0 stock', color: '#f5a524' },
-  { key: 'live', label: 'Live', color: '#30a46c' },
+const STAGES: { key: Stage; label: string; color: string; help: string }[] = [
+  { key: 'not_started', label: 'Not sent', color: '#c9c9c9', help: 'Never sent to this marketplace.' },
+  { key: 'ignored', label: 'Ignored', color: '#9e9e9e', help: 'You chose to skip it for this marketplace.' },
+  { key: 'queue', label: 'In queue', color: '#3b82f6', help: 'Waiting for your approval in the Queue.' },
+  { key: 'approved', label: 'Approved', color: '#6d5ce8', help: 'You approved it — waiting to be sent.' },
+  { key: 'sent', label: 'Processing', color: '#9b59d0', help: 'Sent — the marketplace is checking it.' },
+  { key: 'accepted', label: 'Accepted', color: '#0f9b8e', help: 'Marketplace accepted it — waiting for the offer to show.' },
+  { key: 'rejected', label: 'Rejected', color: '#e5484d', help: 'Marketplace rejected it — click to see the error.' },
+  { key: 'listed', label: 'No offer', color: '#14b8a6', help: 'In their catalogue, but there is no offer (price/stock) yet.' },
+  { key: 'oos', label: 'No stock', color: '#f5a524', help: 'Live, but stock is 0 — customers cannot buy.' },
+  { key: 'live', label: 'Selling', color: '#30a46c', help: 'Live with stock — customers can buy.' },
 ];
-const S = Object.fromEntries(STAGES.map((s) => [s.key, s]));
 const ago = (t: string | null) => { if (!t) return ''; const d = Math.floor((Date.now() - new Date(t).getTime()) / 86_400_000); return d <= 0 ? 'today' : d === 1 ? '1 day' : `${d} days`; };
 const whereToGo = (ch: string, st: Stage) => st === 'queue' || st === 'not_started' ? `/queue?channel=${ch}` : st === 'approved' || st === 'sent' || st === 'rejected' || st === 'accepted' ? `/results?channel=${ch}` : st === 'oos' ? '/inventory' : `/catalog?channel=${ch}`;
 
@@ -48,6 +47,11 @@ const css = `
 .tr-chip { display: inline-flex; gap: 5px; align-items: center; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; color: #fff; text-decoration: none; white-space: nowrap; }
 .tr-sub { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
 .tr-stuck { color: #b42318; font-weight: 700; }
+.tr-cell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.tr-q { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--rule-strong); background: var(--paper); font-weight: 800; font-size: 12px; cursor: pointer; color: inherit; }
+.tr-help { border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); padding: 12px 14px; margin: 10px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 16px; font-size: 12.5px; }
+.tr-help div { display: flex; gap: 8px; align-items: flex-start; }
+.tr-help b { white-space: nowrap; }
 .tr-thumb { width: 36px; height: 46px; border-radius: 4px; object-fit: cover; background: #f4f4f4; flex: none; }
 @media (max-width: 700px) { .tr { padding: 16px 12px 40px; } }
 `;
@@ -59,6 +63,7 @@ export default function TrackerPage() {
   const [stuck, setStuck] = useState(false);
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
+  const [help, setHelp] = useState(false);
 
   const load = useCallback(() => {
     fetch(`/api/tracker?${new URLSearchParams({ channel, stage, stuck: stuck ? '1' : '0', q, page: String(page) })}`).then((r) => r.json()).then(setData).catch(() => {});
@@ -74,8 +79,14 @@ export default function TrackerPage() {
       <Rail />
       <section className="tr">
         <style>{css}</style>
-        <h2>Go-live tracker</h2>
-        <p className="status-line">Every Nordstrom style and colour on every marketplace: in queue → approved → sent → accepted → live. Red = stuck (too long in one step, or rejected). Click a status to go where you fix it.</p>
+        <h2 style={{ display: 'flex', gap: 8, alignItems: 'center' }}>Go-live tracker <button className="tr-q" title="What do the colours mean?" onClick={() => setHelp(!help)}>?</button></h2>
+        <p className="status-line">Each box shows how many sizes are in each status — for example <b>4 · Selling</b> and <b>1 · No stock</b>. Click a status to fix it. Press <b>?</b> to see what each colour means.</p>
+        {help && (
+          <div className="tr-help">
+            {[...STAGES].reverse().map((x) => <div key={x.key}><i className="tr-dot" style={{ background: x.color, marginTop: 4, flex: 'none' }} /><span><b>{x.label}</b> — {x.help}</span></div>)}
+            <div><span className="tr-stuck" style={{ flex: 'none' }}>⚠</span><span><b>Stuck</b> — too many days in one step, or rejected.</span></div>
+          </div>
+        )}
 
         <div className="tr-cards">
           {chs.map((c) => { const s = data!.summary[c]; const total = Object.values(s.counts).reduce((a, b) => a + (b ?? 0), 0) || 1; return (
@@ -115,10 +126,15 @@ export default function TrackerPage() {
                         <div><div style={{ fontWeight: 600 }}>{r.title}</div><div className="tr-sub">{r.styleCode} · {r.color} · {r.sizes} size{r.sizes === 1 ? '' : 's'}</div></div>
                       </div>
                     </td>
-                    {shown.map((c) => { const x = r.cells[c]; const st = S[x.stage]; const other = (Object.entries(x.counts) as [Stage, number][]).filter(([k]) => k !== x.stage); return (
-                      <td key={c} style={{ minWidth: 150 }}>
-                        <Link href={whereToGo(c, x.stage)} className="tr-chip" style={{ background: st.color }}>{st.label}{x.counts[x.stage] !== r.sizes ? ` · ${x.counts[x.stage]}/${r.sizes}` : ''}</Link>
-                        {other.length > 0 && <div className="tr-sub">{other.map(([k, n]) => `${S[k].label} ${n}`).join(' · ')}</div>}
+                    {shown.map((c) => { const x = r.cells[c]; const parts = STAGES.slice().reverse().filter((s) => (x.counts[s.key] ?? 0) > 0).map((s) => ({ s, n: x.counts[s.key] ?? 0 })); return (
+                      <td key={c} style={{ minWidth: 130 }}>
+                        <div className="tr-cell">
+                          {parts.map(({ s, n }) => (
+                            <Link key={s.key} href={whereToGo(c, s.key)} className="tr-chip" style={{ background: s.color }} title={`${n} of ${r.sizes} size${r.sizes === 1 ? '' : 's'}: ${s.help}`}>
+                              {n === r.sizes ? `All · ${s.label}` : `${n} · ${s.label}`}
+                            </Link>
+                          ))}
+                        </div>
                         {x.since && ['queue', 'approved', 'sent', 'accepted', 'rejected'].includes(x.stage) && <div className={`tr-sub${x.stuck ? ' tr-stuck' : ''}`}>{x.stuck ? '⚠ ' : ''}{ago(x.since)} in this step</div>}
                         {x.error && <div className="tr-sub tr-stuck" title={x.error}>{x.error.slice(0, 70)}</div>}
                       </td>
