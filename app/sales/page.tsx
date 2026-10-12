@@ -125,7 +125,8 @@ export default function SalesPage() {
         {loadingHistory.length > 0 && <p className="status-line">Loading order history (last 12 months): {loadingHistory.map((s) => `${s.name} ${s.total.toLocaleString()} orders so far`).join(' · ')}. Numbers fill in over the next minutes.</p>}
         {errors.length > 0 && <p style={{ color: '#b42318', fontSize: 12 }}>{errors.map((s) => `${s.name}: ${s.error}`).join(' · ')}</p>}
 
-        <div className="sa-cards">
+        {!data && <p className="status-line">Loading sales… the first time can take up to a minute.</p>}
+        {data && <div className="sa-cards">
           <button className={`sa-card${channel === '' ? ' on' : ''}`} onClick={() => { setChannel(''); setPage(1); }}>
             <div className="n">All marketplaces</div>
             <div className="big">{all.units.toLocaleString()} units</div>
@@ -141,7 +142,7 @@ export default function SalesPage() {
               {s.top.length > 0 && <div className="sa-sub" style={{ marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Top: {s.top.map((t) => `${t.title}${t.color ? ` (${t.color})` : ''} ${t.units}`).join(' · ')}</div>}
             </button>
           ); })}
-        </div>
+        </div>}
 
         <div className="sa-tabs">
           {[['all', 'All'], ['best', LABELS.best.text], ['rising', LABELS.rising.text], ['falling', LABELS.falling.text], ['slow', LABELS.slow.text], ['none', LABELS.none.text]].map(([k, t]) => (
