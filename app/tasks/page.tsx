@@ -211,7 +211,7 @@ export default function TasksPage() {
         <div className="tk-bar">
           <button className={`tk-tab${view === 'board' ? ' on' : ''}`} onClick={() => setView('board')}>Board</button>
           <button className={`tk-tab${view === 'due' ? ' on' : ''}`} onClick={() => setView('due')}>Due dates</button>
-          <button className={`tk-tab${person === data?.me.id ? ' on' : ''}`} onClick={() => setPerson(person === data?.me.id ? '' : data?.me.id ?? '')}>My tasks</button>
+          <button className={`tk-tab${person === data?.me?.id ? ' on' : ''}`} onClick={() => setPerson(person === data?.me?.id ? '' : data?.me?.id ?? '')}>My tasks</button>
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks" />
           <select value={person} onChange={(e) => setPerson(e.target.value)}>
             <option value="">Everyone</option>
