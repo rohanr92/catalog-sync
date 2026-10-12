@@ -1,3 +1,4 @@
+import NotifyBell from '@/components/NotifyBell';
 import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import Providers from '@/components/Providers';
@@ -18,7 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${inter.variable} ${mono.variable}`}>
       <body suppressHydrationWarning>
         <Theme />
-        <Providers>{children}</Providers>
+        <Providers>{children}<NotifyBell /></Providers>
       </body>
     </html>
   );

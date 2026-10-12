@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Suspense } from 'react';
 import useSWR from 'swr';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { LayoutDashboard, Package, Download, ScanBarcode, ListChecks, Images, Send, FolderTree, Tags, ListFilter, Ruler, Upload, Plug, ScrollText, Activity, Wrench, Boxes, ImagePlus, Route, ScanSearch as IqIcon, TrendingUp as SalesIcon, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Package, Download, ScanBarcode, ListChecks, Images, Send, FolderTree, Tags, ListFilter, Ruler, Upload, Plug, ScrollText, Activity, Wrench, Boxes, ImagePlus, Route, ScanSearch as IqIcon, TrendingUp as SalesIcon, ListChecks as TasksIcon, type LucideIcon } from 'lucide-react';
 import Spinner from './Spinner';
 import { useMounted } from '@/lib/use-mounted';
 import type { ChannelSummary } from '@/lib/types';
@@ -77,6 +77,7 @@ function RailInner() {
       { href: "/tracker", label: "Go-live tracker", icon: Route, desc: "Where every style/colour stands on each marketplace: queue → sent → live" },
       { href: "/image-quality", label: "Image quality", icon: IqIcon, desc: "Too small, wrong shape, not-white background, blurry, duplicate or broken images" },
       { href: "/sales", label: "Sales", icon: SalesIcon, desc: "Units sold per style on each marketplace — best sellers, rising, falling, not selling" },
+      { href: "/tasks", label: "Team tasks", icon: TasksIcon, desc: "Board of team tasks with owners, status, due dates and notifications" },
       { href: "/upc-check", label: "UPC check", icon: ScanBarcode, desc: "UPCs that do not line up between Nordstrom and each marketplace" },
       { href: "/inventory", label: "Inventory", icon: Boxes, desc: "Marketplace stock vs Shopify, matched by UPC" },
       { href: "/fix-rules", label: "Auto-fix rules", icon: Wrench, desc: "Fix the same marketplace errors automatically before every send" },

@@ -515,3 +515,60 @@ model SaleLine {
 
   @@index([channelKey, createdAt])
 }
+
+model TaskGroup {
+  id        String   @id @default(cuid())
+  name      String
+  color     String   @default("#579bfc")
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  groupId     String
+  title       String
+  description String    @default("")
+  status      String    @default("not_started")
+  priority    String    @default("medium")
+  ownerId     String?
+  dueDate     DateTime?
+  link        String    @default("")
+  channelKey  String    @default("")
+  checklist   Json      @default("[]")
+  position    Float     @default(0)
+  createdById String
+  doneAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([groupId])
+  @@index([status])
+}
+
+model TaskActivity {
+  id        String   @id @default(cuid())
+  taskId    String
+  userId    String
+  userName  String
+  kind      String
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  taskId    String?
+  kind      String
+  text      String
+  link      String   @default("")
+  byName    String   @default("")
+  read      Boolean  @default(false)
+  dedupe    String?  @unique
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
