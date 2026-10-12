@@ -495,3 +495,23 @@ model BulkImage {
   @@index([channelKey, status])
   @@index([channelKey, groupKey])
 }
+
+model SaleLine {
+  id         String   @id
+  channelKey String
+  orderId    String
+  lineId     String
+  createdAt  DateTime
+  state      String
+  sku        String
+  title      String   @default("")
+  qty        Int
+  refundQty  Int      @default(0)
+  refundAmt  Float    @default(0)
+  price      Float    @default(0)
+  total      Float    @default(0)
+  currency   String   @default("USD")
+  updatedAt  DateTime @updatedAt
+
+  @@index([channelKey, createdAt])
+}
