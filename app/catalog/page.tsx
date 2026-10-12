@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
@@ -71,6 +71,32 @@ function Inner() {
   const { data: d, mutate } = useSWR<Detail>(sel && tab === 'products' ? `/api/catalog?channel=${channel}&key=${encodeURIComponent(sel)}` : null);
   const { data: runs } = useSWR<{ runs: Run[] }>(channel && tab === 'pulls' ? `/api/pulls?channel=${channel}` : null, { refreshInterval: 30_000 });
   const refresh = () => { mutate(); mList(); };
+
+  // Opened from Listing health: ?q=<style>&color=<colour>&open=info|images
+  const [want, setWant] = useState<{ style: string; color: string; open: string } | null>(null);
+  const [openWhat, setOpenWhat] = useState('');
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const style = p.get('q');
+    if (!style) return;
+    setQ(style);
+    setWant({ style: style.toLowerCase(), color: (p.get('color') ?? '').toLowerCase(), open: p.get('open') ?? '' });
+  }, []);
+  useEffect(() => {
+    if (!want || !data) return;
+    const gs = data.groups;
+    const g = gs.find((x) => x.styleCode.toLowerCase() === want.style && (!want.color || x.color.toLowerCase() === want.color))
+      ?? gs.find((x) => x.styleCode.toLowerCase() === want.style)
+      ?? (gs.length === 1 ? gs[0] : undefined);
+    if (g) { setSel(g.key); setOpenWhat(want.open); }
+    if (g || data.groups.length < 400) setWant(null);
+  }, [want, data]);
+  useEffect(() => {
+    if (!d || !openWhat) return;
+    if (openWhat === 'info') setSheetOpen(true);
+    if (openWhat === 'images') setImgOpen(true);
+    setOpenWhat('');
+  }, [d, openWhat]);
 
   async function save(payload: { images?: string[]; fields?: Record<string, Record<string, string>> }) {
     if (!d) return;

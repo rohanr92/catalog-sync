@@ -1,0 +1,173 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import Rail from '@/components/Shell';
+import ImagePanel from '@/components/ImagePanel';
+import Spinner from '@/components/Spinner';
+import type { Group } from '@/lib/types';
+
+type Issue = { kind: string; text: string; points: number };
+type Item = {
+  channel: string; key: string; styleCode: string; color: string; title: string; category: string;
+  sizes: { upc: string; size: string }[]; images: string[]; slots: number; swatchUrl: string | null;
+  nordStyle: string | null; nordColor: string | null; score: number; issues: Issue[];
+};
+type Summary = { key: string; name: string; total: number; avg: number; poor: number; fair: number; good: number };
+type Data = { summary: Summary[]; issueCounts: Record<string, number>; total: number; page: number; per: number; items: Item[]; error?: string };
+
+const ISSUES: { kind: string; label: string }[] = [
+  { kind: 'main-image', label: 'No main image' },
+  { kind: 'images', label: 'Too few images' },
+  { kind: 'swatch', label: 'No swatch' },
+  { kind: 'description', label: 'Description' },
+  { kind: 'required', label: 'Missing required' },
+  { kind: 'size', label: 'Wrong size' },
+  { kind: 'invalid', label: 'Value not accepted' },
+];
+const IMAGE_KINDS = new Set(['main-image', 'images', 'swatch']);
+const tone = (s: number) => (s < 60 ? { bg: '#fde8e6', fg: '#b42318' } : s < 85 ? { bg: '#fdf1dc', fg: '#8a5a00' } : { bg: '#e3f5ea', fg: '#16713f' });
+
+const css = `
+.hl { padding: 22px 24px 40px; overflow-y: auto; min-width: 0; }
+.hl h2 { font-size: 22px; font-weight: 800; margin: 0 0 4px; }
+.hl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 16px 0; }
+.hl-card { border: 1px solid var(--rule); border-radius: 10px; padding: 12px; background: var(--paper); cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.hl-card.on { border-color: #6d5ce8; box-shadow: 0 0 0 1px #6d5ce8; }
+.hl-card .n { font-size: 13px; font-weight: 600; }
+.hl-card .s { font-size: 28px; font-weight: 800; margin: 4px 0; }
+.hl-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #eee; }
+.hl-card .m { font-size: 11px; color: var(--ink-3); margin-top: 6px; }
+.hl-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.hl-tools input { flex: 1; min-width: 180px; max-width: 320px; padding: 7px 10px; border: 1px solid var(--rule-strong); border-radius: 6px; font: inherit; font-size: 13px; background: var(--paper); color: inherit; }
+.hl-chip { font-size: 12px; padding: 4px 10px; border-radius: 14px; border: 1px solid var(--rule); background: var(--paper); cursor: pointer; color: inherit; }
+.hl-chip.on { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+.hl-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid var(--rule); border-radius: 10px; margin-bottom: 8px; background: var(--paper); flex-wrap: wrap; }
+.hl-score { flex: none; width: 52px; height: 52px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; }
+.hl-thumb { flex: none; width: 52px; height: 68px; border-radius: 6px; background: #f4f4f4; overflow: hidden; }
+.hl-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.hl-main { flex: 1; min-width: 200px; }
+.hl-title { font-size: 14px; font-weight: 600; }
+.hl-sub { font-size: 12px; color: var(--ink-3); margin: 2px 0 6px; }
+.hl-is { display: flex; flex-wrap: wrap; gap: 5px; }
+.hl-is span { font-size: 11px; padding: 2px 7px; border-radius: 5px; background: #f3f3f3; }
+.hl-is span.b { background: #fde8e6; color: #b42318; }
+.hl-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.hl-pages { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 14px; font-size: 13px; }
+@media (max-width: 700px) { .hl { padding: 16px 12px 40px; } .hl-acts { width: 100%; } }
+`;
+
+export default function HealthPage() {
+  const [channel, setChannel] = useState('');
+  const [issue, setIssue] = useState('');
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<Data | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Item | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch(`/api/health?${new URLSearchParams({ channel, issue, q, page: String(page) })}`).then((r) => r.json()).then((j: Data) => { setData(j); setLoading(false); }).catch(() => setLoading(false));
+  }, [channel, issue, q, page]);
+  useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
+
+  const names = Object.fromEntries((data?.summary ?? []).map((s) => [s.key, s.name]));
+  const pages = data ? Math.max(1, Math.ceil(data.total / data.per)) : 1;
+
+  const groupFor = (it: Item): Group => ({
+    key: `health:${it.channel}:${it.key}`, styleCode: it.nordStyle ?? it.styleCode, color: it.nordColor ?? it.color, title: it.title, category: it.category,
+    thumb: it.images[0] ?? '', images: it.images, changeType: 'updated', validation: 'valid', basis: 'none', swatchUrl: it.swatchUrl ?? undefined,
+    sizes: it.sizes.map((s) => ({ changeId: '', gtin: s.upc, sku: '', size: s.size, channelSize: s.size, sizeSource: 'none', changeType: 'updated', outputRow: {} })), diffs: [],
+  });
+  const detailsHref = (it: Item) => (it.channel === 'nordstrom' ? `/nordstrom?q=${encodeURIComponent(it.styleCode)}` : `/catalog?channel=${it.channel}&q=${encodeURIComponent(it.styleCode)}`);
+
+  return (
+    <main className="shell" style={{ gridTemplateColumns: 'var(--rail) minmax(0, 1fr)' }}>
+      <Rail />
+      <section className="hl">
+        <style>{css}</style>
+        <h2>Listing health</h2>
+        <p className="status-line">Every style and colour on every marketplace, scored 0–100. Worst first. Checks images, swatch, description, required columns for the category, and values or sizes the marketplace doesn&apos;t accept.</p>
+
+        <div className="hl-cards">
+          <button className={`hl-card${!channel ? ' on' : ''}`} onClick={() => { setChannel(''); setPage(1); }}>
+            <div className="n">All marketplaces</div>
+            <div className="s">{data ? Math.round(data.summary.reduce((n, s) => n + s.avg * s.total, 0) / Math.max(1, data.summary.reduce((n, s) => n + s.total, 0))) : '–'}</div>
+            <div className="m">{data ? `${data.summary.reduce((n, s) => n + s.poor, 0)} need work` : ''}</div>
+          </button>
+          {(data?.summary ?? []).map((s) => (
+            <button key={s.key} className={`hl-card${channel === s.key ? ' on' : ''}`} onClick={() => { setChannel(s.key); setPage(1); }}>
+              <div className="n">{s.name}</div>
+              <div className="s" style={{ color: tone(s.avg).fg }}>{s.avg}</div>
+              <div className="hl-bar">
+                <div style={{ width: `${(s.poor / Math.max(1, s.total)) * 100}%`, background: '#e5484d' }} />
+                <div style={{ width: `${(s.fair / Math.max(1, s.total)) * 100}%`, background: '#f5a524' }} />
+                <div style={{ width: `${(s.good / Math.max(1, s.total)) * 100}%`, background: '#30a46c' }} />
+              </div>
+              <div className="m">{s.poor} poor · {s.fair} fair · {s.good} good</div>
+            </button>
+          ))}
+        </div>
+
+        <div className="hl-tools">
+          <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search title, style, colour or UPC" />
+          <button className={`hl-chip${!issue ? ' on' : ''}`} onClick={() => { setIssue(''); setPage(1); }}>All issues</button>
+          {ISSUES.map((i) => (
+            <button key={i.kind} className={`hl-chip${issue === i.kind ? ' on' : ''}`} onClick={() => { setIssue(i.kind); setPage(1); }}>
+              {i.label} {data?.issueCounts[i.kind] ? `· ${data.issueCounts[i.kind]}` : ''}
+            </button>
+          ))}
+          {loading && <Spinner size={14} />}
+        </div>
+
+        {data?.error && <p style={{ color: '#b42318' }}>{data.error}</p>}
+        {data && !data.items.length && !loading && <div className="cs-empty"><div className="e">🎉</div><div className="t">Nothing here</div><div className="s">No listings match these filters.</div></div>}
+
+        {data?.items.map((it) => {
+          const t = tone(it.score);
+          const imageIssue = it.issues.some((x) => IMAGE_KINDS.has(x.kind));
+          const detailIssue = it.issues.some((x) => !IMAGE_KINDS.has(x.kind));
+          return (
+            <div key={it.channel + it.key} className="hl-row">
+              <div className="hl-score" style={{ background: t.bg, color: t.fg }}>{it.score}</div>
+              <div className="hl-thumb">{/* eslint-disable-next-line @next/next/no-img-element */}{it.images[0] && <img src={it.images[0]} alt="" loading="lazy" />}</div>
+              <div className="hl-main">
+                <div className="hl-title">{it.title || it.styleCode} — {it.color}</div>
+                <div className="hl-sub">{names[it.channel] ?? it.channel} · {it.styleCode} · {it.sizes.length} size{it.sizes.length === 1 ? '' : 's'} · {it.images.length} image{it.images.length === 1 ? '' : 's'}{it.category ? ` · ${it.category}` : ''}</div>
+                <div className="hl-is">
+                  {it.issues.length ? it.issues.map((x, k) => <span key={k} className={x.points >= 15 ? 'b' : ''} title={`-${x.points}`}>{x.text}</span>) : <span>No issues</span>}
+                </div>
+              </div>
+              <div className="hl-acts">
+                {imageIssue && it.channel !== 'nordstrom' && (it.nordStyle
+                  ? <button className="btn primary" onClick={() => setEditing(it)}>Fix images</button>
+                  : <span className="status-line" title="No Nordstrom product with these UPCs">No Nordstrom match</span>)}
+                {(detailIssue || it.channel === 'nordstrom') && <Link className="btn" href={detailsHref(it)}>Fix details</Link>}
+              </div>
+            </div>
+          );
+        })}
+
+        {data && data.total > data.per && (
+          <div className="hl-pages">
+            <button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>← Prev</button>
+            <span>Page {page} of {pages} · {data.total} listings</span>
+            <button className="btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next →</button>
+          </div>
+        )}
+      </section>
+
+      {editing && (
+        <ImagePanel
+          group={groupFor(editing)}
+          channelKey={editing.channel}
+          channelName={names[editing.channel] ?? editing.channel}
+          otherChannels={[]}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+    </main>
+  );
+}

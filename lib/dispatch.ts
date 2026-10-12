@@ -2,6 +2,8 @@ import { ensureSwatch } from "./swatch";
 import { applyChannelEdit, commitChannelEdit } from "./channel-catalog";
 import { sendNordstrom } from "./nordstrom-send";
 import { log } from "./log";
+import { applyFixRules } from "./fix-rules";
+import { smartOn, smartFill } from "./smart-fix";
 import * as XLSX from 'xlsx';
 import { db } from './db';
 import { channelColumns, OFFER_COLUMNS } from './channel-specs';
@@ -73,6 +75,8 @@ export async function sendChannel(channelKey: string, source: 'manual' | 'auto')
     }
   }
   if (!picked.length) return { submissions: 0, rows: 0, skipped, errors: [] as string[] };
+  try { await applyFixRules(channelKey, picked); } catch (e) { await log("push", "Auto-fix rules skipped for " + channelKey + ": " + (e as Error).message, "warn"); }
+  try { if (await smartOn(channelKey)) await smartFill(channelKey, picked); } catch (e) { await log("push", "Smart fix skipped for " + channelKey + ": " + (e as Error).message, "warn"); }
 
   const tpls = (await db.setting.findMany({ where: { key: { startsWith: `template:${channelKey}:` } } })).map((t) => t.value as { codes: string[]; categories: string[] });
   const label = new Map((await getColumnSpecs(channelKey)).map((s) => [s.code, s.label]));
