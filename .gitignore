@@ -44,3 +44,6 @@ node_modules
 .next
 typecheck.txt
 build.txt
+
+*.bak
+*.bak2
