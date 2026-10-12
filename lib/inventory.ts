@@ -1,16 +1,19 @@
 import { db } from './db';
 import { log } from './log';
 
-// Inventory: Shopify + every Mirakl marketplace (Nordstrom included), matched by UPC only. View only.
+// Inventory: Shopify vs every Mirakl marketplace (Nordstrom included).
+// Matching is by UPC: Shopify barcode ↔ the marketplace offer's UPC/EAN. Leading zeros are ignored.
+// Only for offers with no UPC you can map them by SKU (per offer, or "same SKU as Shopify" per marketplace).
 
-export interface InvCfg { buffers: Record<string, number>; autoMinutes?: number; orderTrigger?: boolean; orderDelay?: number } // buffers = units kept back per marketplace
-export interface SnapItem { upc: string; sku: string; qty: number; price: number | null; title?: string; state?: string }
+export interface InvCfg { buffers: Record<string, number>; autoMinutes?: number; orderTrigger?: boolean; orderDelay?: number }
+export interface SnapItem { upc: string; sku: string; qty: number; price: number | null; title?: string; state?: string; via?: 'upc' | 'catalog' | ''; status?: string }
 export interface Snap { pulledAt: string | null; error: string | null; items: SnapItem[]; limitedUntil?: string }
 export interface PushLog { id: string; sku: string; from: number; to: number; at: string; status: string; ok?: number; failed?: number }
+export interface SkuMap { skuMode: boolean; map: Record<string, string> } // offer SKU → Shopify barcode or Shopify SKU
 
 const NAMES: Record<string, string> = { shopify: 'Shopify', nordstrom: 'Nordstrom', macys: "Macy's", kohls: "Kohl's", jcpenney: 'JCPenney', debenhams: 'Debenhams', targetplus: 'Target Plus' };
-export const nameOf = (k: string) => NAMES[k] ?? k;
-export const normUpc = (u: unknown) => String(u ?? '').replace(/\D/g, '').replace(/^0+/, '');
+export const nameOf = (k: string) => NAMES[k] ?? k.charAt(0).toUpperCase() + k.slice(1);
+export const normUpc = (u: unknown) => { const d = String(u ?? '').replace(/\D/g, '').replace(/^0+/, ''); return d.length >= 8 ? d : ''; };
 
 async function getSetting<T>(key: string, d: T): Promise<T> { return ((await db.setting.findUnique({ where: { key } }))?.value as unknown as T) ?? d; }
 async function setSetting(key: string, value: unknown) { await db.setting.upsert({ where: { key }, update: { value: value as never }, create: { key, value: value as never } }); }
@@ -21,6 +24,19 @@ export const getSnap = (k: string) => getSetting<Snap>(`inv:${k}`, { pulledAt: n
 const saveSnap = (k: string, s: Snap) => setSetting(`inv:${k}`, s);
 export const getPushes = (k: string) => getSetting<PushLog[]>(`invPush:${k}`, []);
 const savePushes = (k: string, p: PushLog[]) => setSetting(`invPush:${k}`, p.slice(0, 20));
+export const getMaps = () => getSetting<Record<string, SkuMap>>('invMap', {});
+const saveMaps = (m: Record<string, SkuMap>) => setSetting('invMap', m);
+
+export async function setMapping(ch: string, sku: string, target: string) {
+  const all = await getMaps();
+  const m = all[ch] ?? { skuMode: false, map: {} };
+  if (target.trim()) m.map[sku] = target.trim(); else delete m.map[sku];
+  all[ch] = m; await saveMaps(all);
+}
+export async function setSkuMode(ch: string, on: boolean) {
+  const all = await getMaps();
+  all[ch] = { ...(all[ch] ?? { map: {} }), skuMode: on }; await saveMaps(all);
+}
 
 // ---------- Mirakl ----------
 
@@ -30,14 +46,12 @@ async function conn(ch: string) {
   return { base: c.apiUrl.replace(/\/+$/, ''), key: c.apiKey, shopId: c.shopId ?? '' };
 }
 
+// Every connected Mirakl marketplace — a new one shows up here as soon as it is connected.
 export async function connectedChannels(): Promise<string[]> {
   const cs = await db.channelConnection.findMany({ where: { enabled: true }, select: { channelKey: true, apiUrl: true, apiKey: true } });
   return cs.filter((c: { apiUrl: string | null; apiKey: string | null }) => c.apiUrl && c.apiKey).map((c: { channelKey: string }) => c.channelKey);
 }
 
-interface Offer { shop_sku: string; product_sku?: string; product_title?: string; quantity: number; price: number; state_code?: string; product_references?: { reference: string; reference_type: string }[] }
-
-// Mirakl GET with polite retries when it says "Too Many Requests".
 class Limited extends Error {}
 async function miraklGet(url: string, key: string, accept = 'application/json') {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -68,8 +82,24 @@ function parseCsv(text: string): Record<string, string>[] {
 }
 
 const COOLDOWN_MIN = 10;
+const upcIn = (s: unknown) => normUpc((String(s ?? '').match(/\b\d{11,14}\b/) ?? [])[0] ?? '');
 
-// Every offer in the shop: OF51 export (one call, one CSV) — falls back to OF21 pages, slowly.
+// SKU → UPC from what we already know about this marketplace's catalogue (and Nordstrom's own products).
+async function catalogUpcBySku(ch: string) {
+  const m = new Map<string, string>();
+  const cps = await db.channelProduct.findMany({ where: { channelKey: ch }, select: { upc: true, channelSku: true } });
+  for (const c of cps) if (c.channelSku) m.set(c.channelSku.toLowerCase(), normUpc(c.upc));
+  if (ch === 'nordstrom') {
+    const ps = await db.product.findMany({ select: { sku: true, gtin: true, attrs: true } });
+    for (const p of ps) {
+      const a = (p.attrs ?? {}) as Record<string, string>;
+      for (const s of [p.sku, a['shop-sku'], a['sku']]) if (s) m.set(String(s).toLowerCase(), normUpc(p.gtin));
+    }
+  }
+  return m;
+}
+
+// Offers: OF51 export (one CSV) — falls back to OF21 pages, slowly.
 export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
   const prev = await getSnap(ch);
   if (!opts.force && prev.limitedUntil && new Date(prev.limitedUntil) > new Date()) {
@@ -77,9 +107,14 @@ export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
   }
   const { base, key, shopId } = await conn(ch);
   const shopQ = shopId ? `shop_id=${encodeURIComponent(shopId)}` : '';
-  const cps = await db.channelProduct.findMany({ where: { channelKey: ch }, select: { upc: true, channelSku: true } });
-  const bySku = new Map<string, string>(cps.filter((c: { channelSku: string | null }) => c.channelSku).map((c: { upc: string; channelSku: string | null }): [string, string] => [c.channelSku!.toLowerCase(), c.upc]));
-  const digits = (s: string) => (String(s ?? '').match(/\b\d{11,14}\b/) ?? [])[0] ?? '';
+  const bySku = await catalogUpcBySku(ch);
+  // UPC order: the offer's own UPC/EAN → this marketplace's catalogue (by SKU) → a UPC-looking SKU.
+  const make = (sku: string, upcFromOffer: string, weak: string, extra: Partial<SnapItem>): SnapItem => {
+    const u = normUpc(upcFromOffer);
+    const viaCat = !u ? bySku.get(sku.toLowerCase()) ?? '' : '';
+    const w = !u && !viaCat ? normUpc(weak) : '';
+    return { sku, upc: u || viaCat || w, via: u || w ? 'upc' : viaCat ? 'catalog' : '', qty: 0, price: null, ...extra };
+  };
   try {
     let items: SnapItem[] = [];
     const ex = await miraklGet(`${base}/api/offers/export${shopQ ? `?${shopQ}` : ''}`, key, 'text/csv, */*');
@@ -88,25 +123,23 @@ export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
         if (/^(true|1)$/i.test(r['deleted'] ?? '')) continue;
         const sku = r['shop-sku'] ?? r['offer-sku'] ?? r['sku'] ?? '';
         const refCol = Object.keys(r).find((k) => k.includes('reference'));
-        const ref = (/(ean|upc|gtin)/i.test(r['product-id-type'] ?? '') ? digits(r['product-id']) : '') || (refCol ? digits(r[refCol]) : '') || bySku.get(sku.toLowerCase()) || digits(r['product-sku']) || digits(r['product-id']);
-        items.push({ upc: normUpc(ref), sku, qty: Number(r['quantity'] ?? 0), price: r['price'] ? Number(r['price']) : null, title: r['product-title'], state: r['state-code'] });
+        const fromOffer = (/(ean|upc|gtin)/i.test(r['product-id-type'] ?? '') ? upcIn(r['product-id']) : '') || (refCol ? upcIn(r[refCol]) : '');
+        items.push(make(sku, fromOffer, upcIn(sku) || upcIn(r['product-id']), { qty: Number(r['quantity'] ?? 0), price: r['price'] ? Number(r['price']) : null, title: r['product-title'], state: r['state-code'] }));
       }
     } else {
-      // OF21 — 100 offers per call, one call per second.
-      const offers: Offer[] = [];
+      const offers: { shop_sku: string; product_sku?: string; product_title?: string; quantity: number; price: number; state_code?: string; product_references?: { reference: string; reference_type: string }[] }[] = [];
       for (let offset = 0; offset < 50000; offset += 100) {
         const res = await miraklGet(`${base}/api/offers?max=100&offset=${offset}${shopQ ? `&${shopQ}` : ''}`, key);
         if (!res.ok) throw new Error(`${nameOf(ch)} offers list failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
-        const list: Offer[] = (await res.json()).offers ?? [];
+        const list = (await res.json()).offers ?? [];
         offers.push(...list);
         if (list.length < 100) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
       items = offers.map((o) => {
-        const ref = (o.product_references ?? []).find((x) => /ean|upc|gtin/i.test(x.reference_type) && /^\d{8,14}$/.test(x.reference))?.reference
-          ?? (o.product_references ?? []).find((x) => /^\d{11,14}$/.test(x.reference))?.reference
-          ?? bySku.get(String(o.shop_sku).toLowerCase()) ?? digits(String(o.product_sku ?? ''));
-        return { upc: normUpc(ref), sku: o.shop_sku, qty: Number(o.quantity ?? 0), price: o.price == null ? null : Number(o.price), title: o.product_title, state: o.state_code };
+        const refs = o.product_references ?? [];
+        const fromOffer = refs.find((x) => /ean|upc|gtin/i.test(x.reference_type))?.reference ?? refs.map((x) => upcIn(x.reference)).find(Boolean) ?? '';
+        return make(o.shop_sku, fromOffer, upcIn(o.shop_sku), { qty: Number(o.quantity ?? 0), price: o.price == null ? null : Number(o.price), title: o.product_title, state: o.state_code });
       });
     }
     await saveSnap(ch, { pulledAt: new Date().toISOString(), error: null, items });
@@ -122,7 +155,7 @@ export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
   }
 }
 
-// ---------- Shopify ----------
+// ---------- Shopify (barcode = UPC) ----------
 
 export async function pullShopify() {
   const s = (await db.setting.findUnique({ where: { key: 'shopify' } }))?.value as { domain?: string; token?: string } | undefined;
@@ -131,8 +164,8 @@ export async function pullShopify() {
     const items: SnapItem[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < 200; page++) {
-      const body = JSON.stringify({ query: `query($c:String){ productVariants(first:250, after:$c){ edges{ node{ sku barcode inventoryQuantity price title product{ title } } } pageInfo{ hasNextPage endCursor } } }`, variables: { c: cursor } });
-      let j: { data?: { productVariants: { edges: { node: { sku: string | null; barcode: string | null; inventoryQuantity: number | null; price: string; title: string; product: { title: string } } }[]; pageInfo: { hasNextPage: boolean; endCursor: string } } }; errors?: { message: string; extensions?: { code?: string } }[] } = {};
+      const body = JSON.stringify({ query: `query($c:String){ productVariants(first:250, after:$c){ edges{ node{ sku barcode inventoryQuantity price title product{ title status } } } pageInfo{ hasNextPage endCursor } } }`, variables: { c: cursor } });
+      let j: { data?: { productVariants: { edges: { node: { sku: string | null; barcode: string | null; inventoryQuantity: number | null; price: string; title: string; product: { title: string; status: string } } }[]; pageInfo: { hasNextPage: boolean; endCursor: string } } }; errors?: { message: string; extensions?: { code?: string } }[] } = {};
       for (let attempt = 0; attempt < 5; attempt++) {
         const res = await fetch(`https://${s.domain}/admin/api/2025-07/graphql.json`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': s.token }, body });
         j = await res.json();
@@ -144,16 +177,9 @@ export async function pullShopify() {
         throw new Error(/access|scope|permission/i.test(msg) ? `Shopify app needs the read_inventory and read_products permissions (${msg})` : `Shopify: ${msg}`);
       }
       const pv = j.data!.productVariants;
-      for (const { node: v } of pv.edges) items.push({ upc: normUpc(v.barcode), sku: v.sku ?? '', qty: Number(v.inventoryQuantity ?? 0), price: v.price ? Number(v.price) : null, title: `${v.product.title}${v.title && v.title !== 'Default Title' ? ` — ${v.title}` : ''}` });
+      for (const { node: v } of pv.edges) items.push({ upc: normUpc(v.barcode), via: v.barcode ? 'upc' : '', sku: v.sku ?? '', qty: Number(v.inventoryQuantity ?? 0), price: v.price ? Number(v.price) : null, status: v.product.status, title: `${v.product.title}${v.title && v.title !== 'Default Title' ? ` — ${v.title}` : ''}` });
       if (!pv.pageInfo.hasNextPage) break;
       cursor = pv.pageInfo.endCursor;
-    }
-    // Variants with no barcode: match through the Nordstrom SKU.
-    const noUpc = items.filter((i) => !i.upc && i.sku);
-    if (noUpc.length) {
-      const ps = await db.product.findMany({ where: { sku: { in: noUpc.map((i) => i.sku) } }, select: { sku: true, gtin: true } });
-      const m = new Map<string, string>(ps.map((p: { sku: string | null; gtin: string }): [string, string] => [String(p.sku), p.gtin]));
-      noUpc.forEach((i) => { i.upc = normUpc(m.get(i.sku)); });
     }
     await saveSnap('shopify', { pulledAt: new Date().toISOString(), error: null, items });
     return { count: items.length, unmatched: items.filter((i) => !i.upc).length };
@@ -174,51 +200,80 @@ export async function pullAll() {
   return out;
 }
 
-// ---------- the grid (view only: Shopify is the source, minus each marketplace's buffer) ----------
+// ---------- the grid ----------
 
-export interface Cell { qty: number; price: number | null; sku: string; want: number | null; state: 'ok' | 'diff' | 'no-shopify' }
-export interface GridRow { upc: string; title: string; color: string; size: string; shopify: SnapItem | null; cells: Record<string, Cell | null>; mismatch: boolean }
+export type Via = 'upc' | 'catalog' | 'map' | 'sku';
+export interface Cell { qty: number; price: number | null; sku: string; want: number | null; state: 'ok' | 'diff' | 'no-shopify'; via: Via }
+export interface ShopCell { qty: number; price: number | null; sku: string; title?: string; variants: number; status?: string }
+export interface GridRow { upc: string; title: string; color: string; size: string; shopify: ShopCell | null; cells: Record<string, Cell | null>; mismatch: boolean }
+export interface Unmatched { sku: string; title?: string; qty: number; price: number | null }
 
 export async function buildGrid() {
   const cfg = await getCfg();
+  const maps = await getMaps();
   const channels = await connectedChannels();
   const marketplaces = [...(channels.includes('nordstrom') ? ['nordstrom'] : []), ...channels.filter((c) => c !== 'nordstrom')];
   const cols = ['shopify', ...marketplaces];
   const snaps = Object.fromEntries(await Promise.all(cols.map(async (c) => [c, await getSnap(c)] as const)));
 
+  // Shopify by barcode. If several variants share a barcode, the active one with most stock wins (and it is flagged).
+  const shopBy = new Map<string, ShopCell>();
+  const shopSkuToUpc = new Map<string, string>();
+  for (const v of snaps.shopify.items) {
+    if (v.sku && v.upc) shopSkuToUpc.set(v.sku.toLowerCase(), v.upc);
+    if (!v.upc) continue;
+    const cur = shopBy.get(v.upc);
+    const rank = (x: { status?: string; qty: number }) => (x.status === 'ACTIVE' ? 1e9 : 0) + x.qty;
+    if (!cur) shopBy.set(v.upc, { qty: v.qty, price: v.price, sku: v.sku, title: v.title, variants: 1, status: v.status });
+    else { const n = cur.variants + 1; if (rank(v) > rank(cur)) shopBy.set(v.upc, { qty: v.qty, price: v.price, sku: v.sku, title: v.title, variants: n, status: v.status }); else cur.variants = n; }
+  }
+
   const products = await db.product.findMany({ select: { gtin: true, title: true, color: true, attrs: true } });
   const info = new Map<string, { title: string; color: string; size: string }>();
   for (const p of products) info.set(normUpc(p.gtin), { title: p.title, color: p.color ?? '', size: ((p.attrs ?? {}) as Record<string, string>)['size-description'] ?? '' });
-  for (const c of await db.channelProduct.findMany({ select: { upc: true, title: true, color: true, size: true } })) { const k = normUpc(c.upc); if (!info.has(k)) info.set(k, { title: c.title ?? '', color: c.color ?? '', size: c.size ?? '' }); }
+  for (const c of await db.channelProduct.findMany({ select: { upc: true, title: true, color: true, size: true } })) { const k = normUpc(c.upc); if (k && !info.has(k)) info.set(k, { title: c.title ?? '', color: c.color ?? '', size: c.size ?? '' }); }
 
-  const index: Record<string, Map<string, SnapItem>> = {};
-  for (const c of cols) { index[c] = new Map(); for (const it of snaps[c].items) if (it.upc && !index[c].has(it.upc)) index[c].set(it.upc, it); }
+  // Each marketplace: UPC first; only offers without a UPC use your SKU mapping.
+  const index: Record<string, Map<string, { it: SnapItem; via: Via }>> = {};
+  const unmatched: Record<string, Unmatched[]> = {};
+  for (const c of marketplaces) {
+    index[c] = new Map(); unmatched[c] = [];
+    const m = maps[c] ?? { skuMode: false, map: {} };
+    for (const it of snaps[c].items) {
+      let upc = it.upc, via: Via = it.via === 'catalog' ? 'catalog' : 'upc';
+      if (!upc && m.map[it.sku]) { const t = m.map[it.sku]; upc = normUpc(t) || shopSkuToUpc.get(t.toLowerCase()) || ''; via = 'map'; }
+      if (!upc && m.skuMode) { upc = shopSkuToUpc.get(it.sku.toLowerCase()) ?? ''; via = 'sku'; }
+      if (!upc) { unmatched[c].push({ sku: it.sku, title: it.title, qty: it.qty, price: it.price }); continue; }
+      if (!index[c].has(upc)) index[c].set(upc, { it, via });
+    }
+  }
   const upcs = new Set<string>(); for (const c of marketplaces) for (const u of index[c].keys()) upcs.add(u);
 
   const rows: GridRow[] = [];
   const shopReady = !!snaps.shopify.pulledAt && !snaps.shopify.error;
   for (const upc of upcs) {
-    const shop = index.shopify.get(upc) ?? null;
+    const shop = shopBy.get(upc) ?? null;
     const cells: Record<string, Cell | null> = {};
     let mismatch = false;
     for (const c of marketplaces) {
-      const it = index[c].get(upc);
-      if (!it) { cells[c] = null; continue; }
+      const x = index[c].get(upc);
+      if (!x) { cells[c] = null; continue; }
       const want = shop ? Math.max(0, shop.qty - (cfg.buffers[c] ?? 0)) : null;
-      const state: Cell['state'] = !shop ? 'no-shopify' : want === it.qty ? 'ok' : 'diff';
-      cells[c] = { qty: it.qty, price: it.price, sku: it.sku, want, state };
+      const state: Cell['state'] = !shop ? 'no-shopify' : want === x.it.qty ? 'ok' : 'diff';
+      cells[c] = { qty: x.it.qty, price: x.it.price, sku: x.it.sku, want, state, via: x.via };
       if (state === 'diff' || (state === 'no-shopify' && shopReady)) mismatch = true;
     }
-    const inf = info.get(upc) ?? { title: shop?.title ?? marketplaces.map((c) => index[c].get(upc)?.title).find(Boolean) ?? '', color: '', size: '' };
+    const inf = info.get(upc) ?? { title: shop?.title ?? marketplaces.map((c) => index[c].get(upc)?.it.title).find(Boolean) ?? '', color: '', size: '' };
     rows.push({ upc, ...inf, shopify: shop, cells, mismatch });
   }
   rows.sort((a, b) => Number(b.mismatch) - Number(a.mismatch) || a.title.localeCompare(b.title) || a.color.localeCompare(b.color) || a.size.localeCompare(b.size, undefined, { numeric: true }));
-  const status = Object.fromEntries(cols.map((c) => [c, { name: nameOf(c), pulledAt: snaps[c].pulledAt, error: snaps[c].error, count: snaps[c].items.length, noUpc: snaps[c].items.filter((i) => !i.upc).length }]));
+  const status = Object.fromEntries(cols.map((c) => [c, { name: nameOf(c), pulledAt: snaps[c].pulledAt, error: snaps[c].error, count: snaps[c].items.length, noUpc: c === 'shopify' ? snaps.shopify.items.filter((i) => !i.upc).length : unmatched[c].length }]));
   const summary = Object.fromEntries(marketplaces.map((c) => {
     const cs = rows.map((r) => r.cells[c]).filter(Boolean) as Cell[];
-    return [c, { offers: cs.length, ok: cs.filter((x) => x.state === 'ok').length, diff: cs.filter((x) => x.state === 'diff').length, noShopify: cs.filter((x) => x.state === 'no-shopify').length, buffer: cfg.buffers[c] ?? 0 }];
+    return [c, { offers: snaps[c].items.length, matched: cs.length, ok: cs.filter((x) => x.state === 'ok').length, diff: cs.filter((x) => x.state === 'diff').length, noShopify: cs.filter((x) => x.state === 'no-shopify').length, unmatched: unmatched[c].length, bySku: cs.filter((x) => x.via === 'map' || x.via === 'sku').length, buffer: cfg.buffers[c] ?? 0, skuMode: !!maps[c]?.skuMode }];
   }));
-  return { cfg, cols, marketplaces, status, summary, rows };
+  const dupBarcodes = [...shopBy.values()].filter((x) => x.variants > 1).length;
+  return { cfg, cols, marketplaces, status, summary, rows, unmatched, maps, dupBarcodes };
 }
 
 // ---------- fixing ONE offer by hand (Mirakl OF01, PARTIAL_UPDATE: only quantity changes) ----------

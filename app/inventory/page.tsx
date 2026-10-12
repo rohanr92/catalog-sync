@@ -5,30 +5,34 @@ import { toast } from 'sonner';
 import Rail from '@/components/Shell';
 import Spinner from '@/components/Spinner';
 
-interface Cell { qty: number; price: number | null; sku: string; want: number | null; state: 'ok' | 'diff' | 'no-shopify' }
-interface Row { upc: string; title: string; color: string; size: string; shopify: { qty: number; sku: string; price: number | null } | null; cells: Record<string, Cell | null> }
+type Via = 'upc' | 'catalog' | 'map' | 'sku';
+interface Cell { qty: number; price: number | null; sku: string; want: number | null; state: 'ok' | 'diff' | 'no-shopify'; via: Via }
+interface ShopCell { qty: number; price: number | null; sku: string; title?: string; variants: number; status?: string }
+interface Row { upc: string; title: string; color: string; size: string; shopify: ShopCell | null; cells: Record<string, Cell | null> }
 interface Status { name: string; pulledAt: string | null; error: string | null; count: number; noUpc: number }
-interface Sum { offers: number; ok: number; diff: number; noShopify: number; buffer: number }
+interface Sum { offers: number; matched: number; ok: number; diff: number; noShopify: number; unmatched: number; bySku: number; buffer: number; skuMode: boolean }
 interface Fix { id: string; sku: string; from: number; to: number; at: string; status: string; ok?: number; failed?: number }
 interface Auto { every: number; onOrder: boolean; delay: number; job: { lastFull: string | null; lastReason: string | null; pendingAt: string | null; pendingWhy: string | null } }
-interface Data { auto?: Auto; cols: string[]; marketplaces: string[]; status: Record<string, Status>; summary: Record<string, Sum>; fixes: Record<string, Fix[]>; total: number; page: number; per: number; rows: Row[]; error?: string }
+interface Data { auto: Auto; cols: string[]; marketplaces: string[]; status: Record<string, Status>; summary: Record<string, Sum>; fixes: Record<string, Fix[]>; dupBarcodes: number; total: number; page: number; per: number; rows: Row[]; unmatched?: { sku: string; title?: string; qty: number; price: number | null }[]; mapped?: { sku: string; target: string }[]; error?: string }
 interface Editing { channel: string; sku: string; title: string; qty: number; want: number | null; value: string }
 
 const css = `
 .iv { padding: 22px 24px 40px; overflow-y: auto; min-width: 0; }
 .iv h2 { font-size: 22px; font-weight: 800; margin: 0; }
-.iv-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin: 14px 0; }
+.iv-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; margin: 14px 0; }
 .iv-card { border: 1px solid var(--rule); border-radius: 10px; padding: 12px; background: var(--paper); font-size: 12px; }
 .iv-card.on { border-color: #6d5ce8; box-shadow: 0 0 0 1px #6d5ce8; }
 .iv-card .t { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; }
-.iv-card .big { font-size: 24px; font-weight: 800; margin: 4px 0 2px; }
+.iv-card .big { font-size: 22px; font-weight: 800; margin: 4px 0 2px; }
 .iv-card .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
-.iv-card input { width: 54px; padding: 4px 6px; border: 1px solid var(--rule-strong); border-radius: 5px; font: inherit; font-size: 12px; }
+.iv-card input[type=number] { width: 54px; padding: 4px 6px; border: 1px solid var(--rule-strong); border-radius: 5px; font: inherit; font-size: 12px; }
+.iv-link { background: none; border: 0; padding: 0; color: #4b3fb3; text-decoration: underline; cursor: pointer; font: inherit; }
 .iv-err { color: #b42318; }
 .iv-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 5px; white-space: nowrap; }
 .iv-tag.diff { background: #fde8e6; color: #b42318; }
 .iv-tag.ok { background: #e3f5ea; color: #16713f; }
 .iv-tag.none { background: #fdf1dc; color: #8a5a00; }
+.iv-tag.via { background: #ece9fd; color: #4b3fb3; font-weight: 600; }
 .iv-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 10px; }
 .iv-tools input[type=search] { flex: 1; min-width: 200px; max-width: 340px; padding: 7px 10px; border: 1px solid var(--rule-strong); border-radius: 6px; font: inherit; font-size: 13px; }
 .iv-chip { font-size: 12px; padding: 4px 10px; border-radius: 14px; border: 1px solid var(--rule); background: var(--paper); cursor: pointer; color: inherit; }
@@ -37,6 +41,7 @@ const css = `
 .iv-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .iv-table th { position: sticky; top: 0; background: #fafafa; text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; font-weight: 600; }
 .iv-table td { padding: 7px 10px; border-bottom: 1px solid #f2f2f2; vertical-align: top; }
+.iv-table td input { width: 210px; max-width: 100%; padding: 5px 7px; border: 1px solid var(--rule-strong); border-radius: 5px; font: inherit; font-size: 12px; }
 .iv-q { font-family: var(--mono); font-weight: 700; font-size: 13px; }
 .iv-p { font-family: var(--mono); color: var(--ink-3); font-size: 11px; }
 .iv-fixbtn { font-size: 11px; padding: 1px 7px; margin-left: 4px; }
@@ -47,17 +52,19 @@ const css = `
 
 const ago = (t: string | null) => { if (!t) return 'never'; const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t).toLocaleDateString(); };
 const money = (n: number | null | undefined) => (n == null ? '' : n.toFixed(2));
+const viaText: Record<Via, string> = { upc: '', catalog: 'UPC from catalogue', map: 'mapped by you', sku: 'same SKU' };
 
 export default function InventoryPage() {
   const [data, setData] = useState<Data | null>(null);
   const [q, setQ] = useState('');
-  const [show, setShow] = useState<'diff' | 'all'>('diff');
+  const [show, setShow] = useState<'diff' | 'all' | 'unmatched'>('diff');
   const [channel, setChannel] = useState('');
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [buffers, setBuffers] = useState<Record<string, string>>({});
-  const [editing, setEditing] = useState<Editing | null>(null);
   const [auto, setAuto] = useState<{ every: string; onOrder: boolean; delay: string } | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
+  const [maps, setMaps] = useState<Record<string, string>>({});
 
   const load = useCallback(() => {
     fetch(`/api/inventory?${new URLSearchParams({ q, show, channel, page: String(page) })}`).then((r) => r.json()).then((j: Data) => setData(j)).catch(() => toast.error('Could not load inventory'));
@@ -86,6 +93,16 @@ export default function InventoryPage() {
     try { await post({ action: 'buffer', channel: ch, buffer: buffers[ch] }); toast.success(`${data?.status[ch]?.name} buffer saved`); setBuffers((b) => { const n = { ...b }; delete n[ch]; return n; }); load(); }
     catch (e) { toast.error((e as Error).message); }
   }
+  async function saveAuto() {
+    if (!auto) return;
+    try { await post({ action: 'auto', ...auto }); toast.success('Auto refresh saved'); setAuto(null); load(); } catch (e) { toast.error((e as Error).message); }
+  }
+  async function skuMode(ch: string, on: boolean) {
+    try { await post({ action: 'skuMode', channel: ch, on }); toast.success(on ? `${data?.status[ch]?.name}: offers without a UPC now match a Shopify variant with the same SKU` : 'UPC only'); load(); } catch (e) { toast.error((e as Error).message); }
+  }
+  async function saveMap(sku: string, target: string) {
+    try { await post({ action: 'map', channel, sku, target }); toast.success(target ? `${sku} mapped` : `${sku} mapping removed`); setMaps((m) => { const n = { ...m }; delete n[sku]; return n; }); load(); } catch (e) { toast.error((e as Error).message); }
+  }
   async function sendFix() {
     if (!editing) return;
     const qty = Number(editing.value);
@@ -95,16 +112,13 @@ export default function InventoryPage() {
     catch (e) { toast.error((e as Error).message); }
     setBusy(null);
   }
-  async function saveAuto() {
-    if (!auto) return;
-    try { await post({ action: 'auto', ...auto }); toast.success('Auto refresh saved'); setAuto(null); load(); } catch (e) { toast.error((e as Error).message); }
-  }
   async function check(ch: string) { try { await post({ action: 'check', channel: ch }); load(); } catch (e) { toast.error((e as Error).message); } }
 
   const mk = data?.marketplaces ?? [];
-  const shopS = data?.status.shopify;
-  const pages = data ? Math.max(1, Math.ceil(data.total / data.per)) : 1;
+  const shopS = data?.status?.shopify;
+  const pages = data ? Math.max(1, Math.ceil((data.total ?? 0) / (data.per || 100))) : 1;
   const shown = channel ? [channel] : mk;
+  const openUnmatched = (c: string) => { setChannel(c); setShow('unmatched'); setPage(1); };
 
   return (
     <main className="shell" style={{ gridTemplateColumns: 'var(--rail) minmax(0, 1fr)' }}>
@@ -115,14 +129,7 @@ export default function InventoryPage() {
           <h2 style={{ flex: 1 }}>Inventory</h2>
           <button className="btn primary" disabled={!!busy} onClick={() => refresh()}>{busy === 'all' ? 'Refreshing…' : 'Refresh all'}</button>
         </div>
-        <p className="status-line">Each marketplace&apos;s live offers against Shopify, matched by UPC (SKU formats and leading zeros don&apos;t matter). Expected = Shopify stock minus that marketplace&apos;s buffer. View only — your sync platform keeps updating stock; use <b>Fix</b> only for the odd one.</p>
-
-        {shopS && (
-          <div style={{ fontSize: 12, marginTop: 8 }} className={shopS.error ? 'iv-err' : 'status-line'}>
-            <b>Shopify</b> · {shopS.count} variants{shopS.noUpc ? ` (${shopS.noUpc} without barcode)` : ''} · {ago(shopS.pulledAt)}{shopS.error ? ` · ${shopS.error}` : ''}
-            {' '}<button className="filter" style={{ fontSize: 11, padding: '1px 6px' }} disabled={!!busy} onClick={() => refresh('shopify')}>↻</button>
-          </div>
-        )}
+        <p className="status-line">Matched by <b>UPC</b>: Shopify barcode ↔ each marketplace offer&apos;s UPC/EAN (leading zeros ignored). Only offers that have no UPC can be matched by SKU — map them yourself under <b>not matched</b>. Expected = Shopify stock minus that marketplace&apos;s buffer. Every connected marketplace appears here automatically.</p>
 
         {data?.auto && (() => { const a = auto ?? { every: String(data.auto.every), onOrder: data.auto.onOrder, delay: String(data.auto.delay) }; const j = data.auto.job; return (
           <div className="iv-card" style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -140,15 +147,23 @@ export default function InventoryPage() {
           </div>
         ); })()}
 
+        {shopS && (
+          <div style={{ fontSize: 12, marginTop: 10 }} className={shopS.error ? 'iv-err' : 'status-line'}>
+            <b>Shopify</b> · {shopS.count} variants{shopS.noUpc ? ` · ${shopS.noUpc} without barcode` : ''}{data?.dupBarcodes ? ` · ${data.dupBarcodes} barcode(s) used by more than one variant (the active one with most stock is used)` : ''} · {ago(shopS.pulledAt)}{shopS.error ? ` · ${shopS.error}` : ''}
+            {' '}<button className="filter" style={{ fontSize: 11, padding: '1px 6px' }} disabled={!!busy} onClick={() => refresh('shopify')}>↻</button>
+          </div>
+        )}
+
         <div className="iv-cards">
           {mk.map((c) => { const s = data!.summary[c]; const st = data!.status[c]; return (
             <div key={c} className={`iv-card${channel === c ? ' on' : ''}`}>
-              <div className="t" style={{ cursor: 'pointer' }} onClick={() => { setChannel(channel === c ? '' : c); setPage(1); }}>
+              <div className="t" style={{ cursor: 'pointer' }} onClick={() => { setChannel(channel === c ? '' : c); if (show === 'unmatched') setShow('diff'); setPage(1); }}>
                 <span style={{ flex: 1 }}>{st.name}</span>
                 <button className="filter" style={{ fontSize: 11, padding: '1px 6px' }} disabled={!!busy} onClick={(e) => { e.stopPropagation(); refresh(c); }}>↻</button>
               </div>
               <div className="big" style={{ color: s.diff ? '#b42318' : '#16713f' }}>{s.diff ? `${s.diff} mismatched` : 'All match'}</div>
-              <div>{s.offers} offers · {s.ok} match{s.noShopify ? ` · ${s.noShopify} not on Shopify` : ''}{st.noUpc ? ` · ${st.noUpc} without UPC` : ''}</div>
+              <div>{s.offers} offers · {s.matched} matched by UPC{s.bySku ? ` (${s.bySku} by SKU)` : ''} · {s.ok} same stock{s.noShopify ? ` · ${s.noShopify} not on Shopify` : ''}</div>
+              {s.unmatched > 0 && <div style={{ marginTop: 3 }}><button className="iv-link" onClick={() => openUnmatched(c)}>{s.unmatched} not matched (no UPC) — map them</button></div>}
               <div className={st.error ? 'iv-err' : 'status-line'} style={{ marginTop: 2 }}>{st.error ? st.error.slice(0, 120) : `pulled ${ago(st.pulledAt)}`}</div>
               <div className="row">
                 <span>Buffer</span>
@@ -156,6 +171,9 @@ export default function InventoryPage() {
                 <span className="status-line">kept back</span>
                 {buffers[c] != null && buffers[c] !== String(s.buffer) && <button className="btn primary" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => saveBuffer(c)}>Save</button>}
               </div>
+              <label className="row" style={{ cursor: 'pointer' }} title="Only for offers with no UPC: match them to a Shopify variant with exactly the same SKU">
+                <input type="checkbox" checked={s.skuMode} onChange={(e) => skuMode(c, e.target.checked)} /> offers without UPC: match by same SKU
+              </label>
               {(data!.fixes[c] ?? []).length > 0 && (
                 <div className="status-line" style={{ fontSize: 11, marginTop: 6 }}>
                   {(data!.fixes[c] ?? []).slice(0, 3).map((f) => <div key={f.id}>{f.sku}: {f.from} → {f.to} · {ago(f.at)} · <b>{f.status}</b>{f.failed ? ` · failed` : ''}</div>)}
@@ -170,24 +188,54 @@ export default function InventoryPage() {
           <input type="search" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search title, colour, size, UPC or SKU" />
           <button className={`iv-chip${show === 'diff' ? ' on' : ''}`} onClick={() => { setShow('diff'); setPage(1); }}>Mismatched only</button>
           <button className={`iv-chip${show === 'all' ? ' on' : ''}`} onClick={() => { setShow('all'); setPage(1); }}>Everything</button>
-          {channel && <button className="iv-chip" onClick={() => setChannel('')}>{data?.status[channel]?.name} ✕</button>}
+          {channel && <button className={`iv-chip${show === 'unmatched' ? ' on' : ''}`} onClick={() => { setShow('unmatched'); setPage(1); }}>Not matched · {data?.summary[channel]?.unmatched ?? 0}</button>}
+          {channel && <button className="iv-chip" onClick={() => { setChannel(''); if (show === 'unmatched') setShow('diff'); }}>{data?.status[channel]?.name} ✕</button>}
           {!data && <Spinner size={14} />}
         </div>
 
         {data?.error && <p className="iv-err">{data.error}</p>}
-        {data && !data.error && (mk.every((c) => !data.status[c].pulledAt)
+
+        {data && !data.error && show === 'unmatched' && channel && (
+          <div className="iv-table">
+            <table>
+              <thead><tr><th>{data.status[channel]?.name} offer without UPC</th><th>Stock</th><th>Match it to (Shopify barcode / UPC, or Shopify SKU)</th></tr></thead>
+              <tbody>
+                {(data.unmatched ?? []).length === 0 && <tr><td colSpan={3} className="status-line">Every {data.status[channel]?.name} offer has a UPC. 🎉</td></tr>}
+                {(data.unmatched ?? []).map((u) => (
+                  <tr key={u.sku}>
+                    <td><div style={{ fontWeight: 600 }}>{u.title || '—'}</div><div className="iv-p">SKU {u.sku}{u.price != null ? ` · ${money(u.price)}` : ''}</div></td>
+                    <td className="iv-q">{u.qty}</td>
+                    <td>
+                      <input value={maps[u.sku] ?? ''} onChange={(e) => setMaps({ ...maps, [u.sku]: e.target.value })} placeholder="e.g. 810205995311 or AME-BLK-W38" />
+                      {' '}<button className="btn primary" style={{ padding: '3px 10px', fontSize: 12 }} disabled={!maps[u.sku]?.trim()} onClick={() => saveMap(u.sku, maps[u.sku])}>Save</button>
+                    </td>
+                  </tr>
+                ))}
+                {(data.mapped ?? []).length > 0 && <tr><td colSpan={3} style={{ background: '#fafafa', fontWeight: 600 }}>Your SKU mappings</td></tr>}
+                {(data.mapped ?? []).map((m) => (
+                  <tr key={'m' + m.sku}><td className="iv-p">{m.sku}</td><td /><td><span className="iv-p">→ {m.target}</span> <button className="filter" style={{ fontSize: 11, padding: '1px 6px' }} onClick={() => saveMap(m.sku, '')}>Remove</button></td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {data && !data.error && show !== 'unmatched' && (mk.every((c) => !data.status[c].pulledAt)
           ? <div className="cs-empty"><div className="e">📦</div><div className="t">Nothing pulled yet</div><div className="s">Click <b>Refresh all</b> to pull Shopify and every connected marketplace&apos;s offers.</div></div>
           : data.rows.length === 0
-            ? <div className="cs-empty"><div className="e">✅</div><div className="t">Nothing mismatched</div><div className="s">Every offer matches Shopify minus its buffer.</div></div>
+            ? <div className="cs-empty"><div className="e">✅</div><div className="t">Nothing mismatched</div><div className="s">Every matched offer has Shopify stock minus its buffer.</div></div>
             : (
           <div className="iv-table">
             <table>
-              <thead><tr><th>Product</th><th>Shopify</th>{shown.map((c) => <th key={c}>{data.status[c].name}{data.summary[c].buffer ? ` (−${data.summary[c].buffer})` : ''}</th>)}</tr></thead>
+              <thead><tr><th>Product · UPC</th><th>Shopify</th>{shown.map((c) => <th key={c}>{data.status[c].name}{data.summary[c].buffer ? ` (−${data.summary[c].buffer})` : ''}</th>)}</tr></thead>
               <tbody>
                 {data.rows.map((r) => (
                   <tr key={r.upc}>
-                    <td style={{ minWidth: 200 }}><div style={{ fontWeight: 600 }}>{r.title || '—'}</div><div className="iv-p">{[r.color, r.size].filter(Boolean).join(' · ')} · {r.upc}</div></td>
-                    <td>{r.shopify ? <><span className="iv-q">{r.shopify.qty}</span><div className="iv-p">{money(r.shopify.price)}</div></> : <span className="status-line">—</span>}</td>
+                    <td style={{ minWidth: 200 }}><div style={{ fontWeight: 600 }}>{r.title || '—'}</div><div className="iv-p">{[r.color, r.size].filter(Boolean).join(' · ')}{r.color || r.size ? ' · ' : ''}UPC {r.upc}</div></td>
+                    <td title={r.shopify?.title}>{r.shopify ? <>
+                      <span className="iv-q">{r.shopify.qty}</span>{r.shopify.variants > 1 && <> <span className="iv-tag none" title="More than one Shopify variant has this barcode — the active one with most stock is used">{r.shopify.variants} variants</span></>}
+                      <div className="iv-p">{r.shopify.sku}{r.shopify.price != null ? ` · ${money(r.shopify.price)}` : ''}</div>
+                    </> : <span className="status-line">barcode not in Shopify</span>}</td>
                     {shown.map((c) => { const x = r.cells[c]; if (!x) return <td key={c} className="status-line">not listed</td>; return (
                       <td key={c} title={`SKU ${x.sku}`}>
                         <span className="iv-q">{x.qty}</span>{' '}
@@ -196,6 +244,7 @@ export default function InventoryPage() {
                         {x.state === 'no-shopify' && <span className="iv-tag none">not on Shopify</span>}
                         {x.state !== 'ok' && <button className="filter iv-fixbtn" onClick={() => setEditing({ channel: c, sku: x.sku, title: `${r.title} ${r.color} ${r.size}`.trim(), qty: x.qty, want: x.want, value: String(x.want ?? x.qty) })}>Fix</button>}
                         <div className="iv-p">{x.sku}{x.price != null ? ` · ${money(x.price)}` : ''}</div>
+                        {viaText[x.via] && <span className="iv-tag via">{viaText[x.via]}</span>}
                       </td>
                     ); })}
                   </tr>
@@ -205,10 +254,10 @@ export default function InventoryPage() {
           </div>
         ))}
 
-        {data && data.total > data.per && (
+        {data && (data.total ?? 0) > (data.per || 100) && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', marginTop: 12, fontSize: 13 }}>
             <button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>← Prev</button>
-            <span>Page {page} of {pages} · {data.total} UPCs</span>
+            <span>Page {page} of {pages} · {data.total}</span>
             <button className="btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next →</button>
           </div>
         )}
