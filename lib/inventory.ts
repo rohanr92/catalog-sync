@@ -1,6 +1,7 @@
 import { db } from './db';
 import { log } from './log';
 import { channelColumns } from './channel-specs';
+import { memo, forget } from './memo';
 
 // Inventory: Shopify vs every Mirakl marketplace (Nordstrom included).
 // Matching is by UPC: Shopify barcode ↔ the marketplace offer's UPC/EAN. Leading zeros are ignored.
@@ -17,7 +18,7 @@ export const nameOf = (k: string) => NAMES[k] ?? k.charAt(0).toUpperCase() + k.s
 export const normUpc = (u: unknown) => { const d = String(u ?? '').replace(/\D/g, '').replace(/^0+/, ''); return d.length >= 8 ? d : ''; };
 
 async function getSetting<T>(key: string, d: T): Promise<T> { return ((await db.setting.findUnique({ where: { key } }))?.value as unknown as T) ?? d; }
-async function setSetting(key: string, value: unknown) { await db.setting.upsert({ where: { key }, update: { value: value as never }, create: { key, value: value as never } }); }
+async function setSetting(key: string, value: unknown) { await db.setting.upsert({ where: { key }, update: { value: value as never }, create: { key, value: value as never } }); forget(); }
 
 export const getCfg = async (): Promise<InvCfg> => ({ buffers: {}, ...(await getSetting<Partial<InvCfg>>('inventory', {})) });
 export const saveCfg = (c: InvCfg) => setSetting('inventory', c);
@@ -246,7 +247,8 @@ export interface ShopCell { qty: number; price: number | null; sku: string; titl
 export interface GridRow { upc: string; title: string; color: string; size: string; shopify: ShopCell | null; cells: Record<string, Cell | null>; mismatch: boolean }
 export interface Unmatched { sku: string; title?: string; qty: number; price: number | null }
 
-export async function buildGrid() {
+export const buildGrid = (fresh = false) => memo('inv-grid', 120_000, buildGridNow, fresh);
+async function buildGridNow() {
   const cfg = await getCfg();
   const maps = await getMaps();
   const channels = await connectedChannels();

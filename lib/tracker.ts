@@ -1,5 +1,6 @@
 import { db } from './db';
 import { getSnap, normUpc, nameOf } from './inventory';
+import { memo } from './memo';
 
 // Go-live tracker: for every Nordstrom style/colour, where it stands on each marketplace —
 // queue → approved → sent → accepted → in catalogue → live (with or without stock), or rejected.
@@ -11,7 +12,8 @@ const STUCK_DAYS: Partial<Record<Stage, number>> = { queue: 7, approved: 2, sent
 export interface Cell { stage: Stage; counts: Partial<Record<Stage, number>>; since: string | null; stuck: boolean; error: string | null }
 export interface Row { key: string; styleCode: string; color: string; title: string; thumb: string; sizes: number; cells: Record<string, Cell> }
 
-export async function buildTracker() {
+export const buildTracker = (fresh = false) => memo('tracker', 60_000, buildTrackerNow, fresh);
+async function buildTrackerNow() {
   const channels = (await db.channel.findMany({ where: { isSource: false }, select: { id: true, key: true }, orderBy: { key: 'asc' } })) as { id: string; key: string }[];
   const products = await db.product.findMany({ select: { gtin: true, sku: true, title: true, color: true, attrs: true, images: { orderBy: { position: 'asc' }, take: 1, select: { sourceUrl: true, storedUrl: true } } } });
 

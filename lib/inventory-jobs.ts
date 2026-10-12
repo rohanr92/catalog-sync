@@ -1,6 +1,7 @@
 import { db } from './db';
 import { log } from './log';
-import { getCfg, pullAll, connectedChannels, nameOf } from './inventory';
+import { getCfg, pullAll, connectedChannels, nameOf, buildGrid } from './inventory';
+import { buildTracker } from './tracker';
 
 // Runs every minute (instrumentation.ts):
 //  • a new order on any marketplace → full inventory pull N minutes later
@@ -63,6 +64,7 @@ export async function inventoryTick() {
       if (due !== `every ${every} min`) await log('pull', `Inventory pulled after ${due}`);
     }
     await saveJob(s);
+    await Promise.allSettled([buildGrid(), buildTracker()]); // keep both pages ready
   } finally {
     running = false;
   }

@@ -65,9 +65,11 @@ export default function InventoryPage() {
   const [auto, setAuto] = useState<{ every: string; onOrder: boolean; delay: string } | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [maps, setMaps] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(() => {
-    fetch(`/api/inventory?${new URLSearchParams({ q, show, channel, page: String(page) })}`).then((r) => r.json()).then((j: Data) => setData(j)).catch(() => toast.error('Could not load inventory'));
+    setLoading(true);
+    fetch(`/api/inventory?${new URLSearchParams({ q, show, channel, page: String(page) })}`).then((r) => r.json()).then((j: Data) => setData(j)).catch(() => toast.error('Could not load inventory')).finally(() => setLoading(false));
   }, [q, show, channel, page]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 
@@ -190,7 +192,8 @@ export default function InventoryPage() {
           <button className={`iv-chip${show === 'all' ? ' on' : ''}`} onClick={() => { setShow('all'); setPage(1); }}>Everything</button>
           {channel && <button className={`iv-chip${show === 'unmatched' ? ' on' : ''}`} onClick={() => { setShow('unmatched'); setPage(1); }}>Not matched · {data?.summary[channel]?.unmatched ?? 0}</button>}
           {channel && <button className="iv-chip" onClick={() => { setChannel(''); if (show === 'unmatched') setShow('diff'); }}>{data?.status[channel]?.name} ✕</button>}
-          {!data && <Spinner size={14} />}
+          {(!data || loading) && <Spinner size={14} />}
+          {loading && <style>{'.iv-table { opacity: .45; pointer-events: none; transition: opacity .15s; }'}</style>}
         </div>
 
         {data?.error && <p className="iv-err">{data.error}</p>}

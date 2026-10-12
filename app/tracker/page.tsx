@@ -64,9 +64,11 @@ export default function TrackerPage() {
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
   const [help, setHelp] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(() => {
-    fetch(`/api/tracker?${new URLSearchParams({ channel, stage, stuck: stuck ? '1' : '0', q, page: String(page) })}`).then((r) => r.json()).then(setData).catch(() => {});
+    setLoading(true);
+    fetch(`/api/tracker?${new URLSearchParams({ channel, stage, stuck: stuck ? '1' : '0', q, page: String(page) })}`).then((r) => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
   }, [channel, stage, stuck, q, page]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 
@@ -108,7 +110,8 @@ export default function TrackerPage() {
           <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={stuck} onChange={(e) => { setStuck(e.target.checked); setPage(1); }} /> Stuck only</label>
           {channel && <button className="filter" onClick={() => setChannel('')}>{data?.summary[channel]?.name} ✕</button>}
           <span className="status-line">{data ? `${data.total} colours` : ''}</span>
-          {!data && <Spinner size={14} />}
+          {(!data || loading) && <Spinner size={14} />}
+          {loading && <style>{'.tr-table { opacity: .45; pointer-events: none; transition: opacity .15s; }'}</style>}
         </div>
 
         {data?.error && <p style={{ color: '#b42318' }}>{data.error}</p>}
