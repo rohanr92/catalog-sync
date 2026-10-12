@@ -5,7 +5,7 @@ import { log } from './log';
 
 export interface InvCfg { buffers: Record<string, number>; autoMinutes?: number; orderTrigger?: boolean; orderDelay?: number } // buffers = units kept back per marketplace
 export interface SnapItem { upc: string; sku: string; qty: number; price: number | null; title?: string; state?: string }
-export interface Snap { pulledAt: string | null; error: string | null; items: SnapItem[] }
+export interface Snap { pulledAt: string | null; error: string | null; items: SnapItem[]; limitedUntil?: string }
 export interface PushLog { id: string; sku: string; from: number; to: number; at: string; status: string; ok?: number; failed?: number }
 
 const NAMES: Record<string, string> = { shopify: 'Shopify', nordstrom: 'Nordstrom', macys: "Macy's", kohls: "Kohl's", jcpenney: 'JCPenney', debenhams: 'Debenhams', targetplus: 'Target Plus' };
@@ -37,34 +37,86 @@ export async function connectedChannels(): Promise<string[]> {
 
 interface Offer { shop_sku: string; product_sku?: string; product_title?: string; quantity: number; price: number; state_code?: string; product_references?: { reference: string; reference_type: string }[] }
 
-// OF21 — every offer in the shop.
-export async function pullOffers(ch: string) {
+// Mirakl GET with polite retries when it says "Too Many Requests".
+class Limited extends Error {}
+async function miraklGet(url: string, key: string, accept = 'application/json') {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url, { headers: { Authorization: key, Accept: accept } });
+    if (res.status !== 429) return res;
+    const wait = Math.min(30, Number(res.headers.get('Retry-After')) || 10 * (attempt + 1));
+    await new Promise((r) => setTimeout(r, wait * 1000));
+  }
+  throw new Limited('rate limit');
+}
+
+function parseCsv(text: string): Record<string, string>[] {
+  const first = text.split(/\r?\n/, 1)[0] ?? '';
+  const sep = (first.match(/;/g) ?? []).length >= (first.match(/,/g) ?? []).length ? ';' : ',';
+  const rows: string[][] = [];
+  let row: string[] = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; continue; }
+    if (ch === '"') q = true;
+    else if (ch === sep) { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  const head = (rows.shift() ?? []).map((h) => h.trim().toLowerCase());
+  return rows.filter((r) => r.some(Boolean)).map((r) => Object.fromEntries(head.map((h, i) => [h, (r[i] ?? '').trim()])));
+}
+
+const COOLDOWN_MIN = 10;
+
+// Every offer in the shop: OF51 export (one call, one CSV) — falls back to OF21 pages, slowly.
+export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
+  const prev = await getSnap(ch);
+  if (!opts.force && prev.limitedUntil && new Date(prev.limitedUntil) > new Date()) {
+    return { count: prev.items.length, unmatched: prev.items.filter((i) => !i.upc).length, skipped: true };
+  }
   const { base, key, shopId } = await conn(ch);
-  const offers: Offer[] = [];
+  const shopQ = shopId ? `shop_id=${encodeURIComponent(shopId)}` : '';
+  const cps = await db.channelProduct.findMany({ where: { channelKey: ch }, select: { upc: true, channelSku: true } });
+  const bySku = new Map<string, string>(cps.filter((c: { channelSku: string | null }) => c.channelSku).map((c: { upc: string; channelSku: string | null }): [string, string] => [c.channelSku!.toLowerCase(), c.upc]));
+  const digits = (s: string) => (String(s ?? '').match(/\b\d{11,14}\b/) ?? [])[0] ?? '';
   try {
-    for (let offset = 0; offset < 50000; offset += 100) {
-      const q = new URLSearchParams({ max: '100', offset: String(offset) });
-      if (shopId) q.set('shop_id', shopId);
-      const res = await fetch(`${base}/api/offers?${q}`, { headers: { Authorization: key, Accept: 'application/json' } });
-      if (!res.ok) throw new Error(`${nameOf(ch)} offers list failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
-      const j = await res.json();
-      const list: Offer[] = j.offers ?? [];
-      offers.push(...list);
-      if (list.length < 100) break;
+    let items: SnapItem[] = [];
+    const ex = await miraklGet(`${base}/api/offers/export${shopQ ? `?${shopQ}` : ''}`, key, 'text/csv, */*');
+    if (ex.ok) {
+      for (const r of parseCsv(await ex.text())) {
+        if (/^(true|1)$/i.test(r['deleted'] ?? '')) continue;
+        const sku = r['shop-sku'] ?? r['offer-sku'] ?? r['sku'] ?? '';
+        const refCol = Object.keys(r).find((k) => k.includes('reference'));
+        const ref = (/(ean|upc|gtin)/i.test(r['product-id-type'] ?? '') ? digits(r['product-id']) : '') || (refCol ? digits(r[refCol]) : '') || bySku.get(sku.toLowerCase()) || digits(r['product-sku']) || digits(r['product-id']);
+        items.push({ upc: normUpc(ref), sku, qty: Number(r['quantity'] ?? 0), price: r['price'] ? Number(r['price']) : null, title: r['product-title'], state: r['state-code'] });
+      }
+    } else {
+      // OF21 — 100 offers per call, one call per second.
+      const offers: Offer[] = [];
+      for (let offset = 0; offset < 50000; offset += 100) {
+        const res = await miraklGet(`${base}/api/offers?max=100&offset=${offset}${shopQ ? `&${shopQ}` : ''}`, key);
+        if (!res.ok) throw new Error(`${nameOf(ch)} offers list failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+        const list: Offer[] = (await res.json()).offers ?? [];
+        offers.push(...list);
+        if (list.length < 100) break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      items = offers.map((o) => {
+        const ref = (o.product_references ?? []).find((x) => /ean|upc|gtin/i.test(x.reference_type) && /^\d{8,14}$/.test(x.reference))?.reference
+          ?? (o.product_references ?? []).find((x) => /^\d{11,14}$/.test(x.reference))?.reference
+          ?? bySku.get(String(o.shop_sku).toLowerCase()) ?? digits(String(o.product_sku ?? ''));
+        return { upc: normUpc(ref), sku: o.shop_sku, qty: Number(o.quantity ?? 0), price: o.price == null ? null : Number(o.price), title: o.product_title, state: o.state_code };
+      });
     }
-    // UPC from the offer's product references; otherwise through the catalogue by SKU.
-    const cps = await db.channelProduct.findMany({ where: { channelKey: ch }, select: { upc: true, channelSku: true } });
-    const bySku = new Map<string, string>(cps.filter((c: { channelSku: string | null }) => c.channelSku).map((c: { upc: string; channelSku: string | null }): [string, string] => [c.channelSku!.toLowerCase(), c.upc]));
-    const items: SnapItem[] = offers.map((o) => {
-      const ref = (o.product_references ?? []).find((r) => /ean|upc|gtin/i.test(r.reference_type) && /^\d{8,14}$/.test(r.reference))?.reference
-        ?? (o.product_references ?? []).find((r) => /^\d{11,14}$/.test(r.reference))?.reference
-        ?? bySku.get(String(o.shop_sku).toLowerCase()) ?? (/^\d{11,14}$/.test(String(o.product_sku)) ? o.product_sku : '') ?? '';
-      return { upc: normUpc(ref), sku: o.shop_sku, qty: Number(o.quantity ?? 0), price: o.price == null ? null : Number(o.price), title: o.product_title, state: o.state_code };
-    });
     await saveSnap(ch, { pulledAt: new Date().toISOString(), error: null, items });
     return { count: items.length, unmatched: items.filter((i) => !i.upc).length };
   } catch (e) {
-    const prev = await getSnap(ch);
+    if (e instanceof Limited) {
+      const until = new Date(Date.now() + COOLDOWN_MIN * 60_000).toISOString();
+      await saveSnap(ch, { ...prev, error: `${nameOf(ch)} is limiting requests — showing the last pull, trying again after ${new Date(until).toLocaleTimeString()}`, limitedUntil: until });
+      throw new Error(`${nameOf(ch)} is busy (too many requests) — kept the last pull, will retry in ${COOLDOWN_MIN} min`);
+    }
     await saveSnap(ch, { ...prev, error: (e as Error).message });
     throw e;
   }
