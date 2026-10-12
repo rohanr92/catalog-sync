@@ -1,12 +1,13 @@
 import { db } from './db';
 import { log } from './log';
+import { channelColumns } from './channel-specs';
 
 // Inventory: Shopify vs every Mirakl marketplace (Nordstrom included).
 // Matching is by UPC: Shopify barcode ↔ the marketplace offer's UPC/EAN. Leading zeros are ignored.
 // Only for offers with no UPC you can map them by SKU (per offer, or "same SKU as Shopify" per marketplace).
 
 export interface InvCfg { buffers: Record<string, number>; autoMinutes?: number; orderTrigger?: boolean; orderDelay?: number }
-export interface SnapItem { upc: string; sku: string; qty: number; price: number | null; title?: string; state?: string; via?: 'upc' | 'catalog' | ''; status?: string }
+export interface SnapItem { upc: string; sku: string; qty: number; price: number | null; title?: string; state?: string; via?: 'upc' | 'catalog' | ''; status?: string; pid?: string }
 export interface Snap { pulledAt: string | null; error: string | null; items: SnapItem[]; limitedUntil?: string }
 export interface PushLog { id: string; sku: string; from: number; to: number; at: string; status: string; ok?: number; failed?: number }
 export interface SkuMap { skuMode: boolean; map: Record<string, string> } // offer SKU → Shopify barcode or Shopify SKU
@@ -87,8 +88,15 @@ const upcIn = (s: unknown) => normUpc((String(s ?? '').match(/\b\d{11,14}\b/) ??
 // SKU → UPC from what we already know about this marketplace's catalogue (and Nordstrom's own products).
 async function catalogUpcBySku(ch: string) {
   const m = new Map<string, string>();
-  const cps = await db.channelProduct.findMany({ where: { channelKey: ch }, select: { upc: true, channelSku: true } });
-  for (const c of cps) if (c.channelSku) m.set(c.channelSku.toLowerCase(), normUpc(c.upc));
+  const spec = channelColumns[ch];
+  const cols = [spec?.sku, spec?.altUpc, 'product_id', 'shop_sku', 'shopSku', 'sku', 'SHOP_SKU', 'uid_code'].filter(Boolean) as string[];
+  const cps = await db.channelProduct.findMany({ where: { channelKey: ch }, select: { upc: true, channelSku: true, raw: true } });
+  for (const c of cps) {
+    const u = normUpc(c.upc);
+    if (!u) continue;
+    const raw = (c.raw ?? {}) as Record<string, string>;
+    for (const s of [c.channelSku, ...cols.map((k) => raw[k])]) if (s && String(s).trim()) m.set(String(s).trim().toLowerCase(), u);
+  }
   if (ch === 'nordstrom') {
     const ps = await db.product.findMany({ select: { sku: true, gtin: true, attrs: true } });
     for (const p of ps) {
@@ -109,9 +117,9 @@ export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
   const shopQ = shopId ? `shop_id=${encodeURIComponent(shopId)}` : '';
   const bySku = await catalogUpcBySku(ch);
   // UPC order: the offer's own UPC/EAN → this marketplace's catalogue (by SKU) → a UPC-looking SKU.
-  const make = (sku: string, upcFromOffer: string, weak: string, extra: Partial<SnapItem>): SnapItem => {
+  const make = (sku: string, upcFromOffer: string, weak: string, extra: Partial<SnapItem>, alts: string[] = []): SnapItem => {
     const u = normUpc(upcFromOffer);
-    const viaCat = !u ? bySku.get(sku.toLowerCase()) ?? '' : '';
+    const viaCat = !u ? [sku, ...alts].map((x) => bySku.get(String(x ?? '').trim().toLowerCase())).find(Boolean) ?? '' : '';
     const w = !u && !viaCat ? normUpc(weak) : '';
     return { sku, upc: u || viaCat || w, via: u || w ? 'upc' : viaCat ? 'catalog' : '', qty: 0, price: null, ...extra };
   };
@@ -124,7 +132,7 @@ export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
         const sku = r['shop-sku'] ?? r['offer-sku'] ?? r['sku'] ?? '';
         const refCol = Object.keys(r).find((k) => k.includes('reference'));
         const fromOffer = (/(ean|upc|gtin)/i.test(r['product-id-type'] ?? '') ? upcIn(r['product-id']) : '') || (refCol ? upcIn(r[refCol]) : '');
-        items.push(make(sku, fromOffer, upcIn(sku) || upcIn(r['product-id']), { qty: Number(r['quantity'] ?? 0), price: r['price'] ? Number(r['price']) : null, title: r['product-title'], state: r['state-code'] }));
+        items.push(make(sku, fromOffer, upcIn(sku) || upcIn(r['product-id']), { qty: Number(r['quantity'] ?? 0), price: r['price'] ? Number(r['price']) : null, title: r['product-title'], state: r['state-code'], pid: r['product-sku'] || r['product-id'] }, [r['product-sku'], r['product-id']]));
       }
     } else {
       const offers: { shop_sku: string; product_sku?: string; product_title?: string; quantity: number; price: number; state_code?: string; product_references?: { reference: string; reference_type: string }[] }[] = [];
@@ -139,9 +147,10 @@ export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
       items = offers.map((o) => {
         const refs = o.product_references ?? [];
         const fromOffer = refs.find((x) => /ean|upc|gtin/i.test(x.reference_type))?.reference ?? refs.map((x) => upcIn(x.reference)).find(Boolean) ?? '';
-        return make(o.shop_sku, fromOffer, upcIn(o.shop_sku), { qty: Number(o.quantity ?? 0), price: o.price == null ? null : Number(o.price), title: o.product_title, state: o.state_code });
+        return make(o.shop_sku, fromOffer, upcIn(o.shop_sku), { qty: Number(o.quantity ?? 0), price: o.price == null ? null : Number(o.price), title: o.product_title, state: o.state_code, pid: o.product_sku }, [o.product_sku ?? '']);
       });
     }
+    await productRefs(ch, base, key, shopQ, items);
     await saveSnap(ch, { pulledAt: new Date().toISOString(), error: null, items });
     return { count: items.length, unmatched: items.filter((i) => !i.upc).length };
   } catch (e) {
@@ -153,6 +162,35 @@ export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
     await saveSnap(ch, { ...prev, error: (e as Error).message });
     throw e;
   }
+}
+
+// P31 — the marketplace's own product record holds the EAN/UPC. Asked only for offers still without one.
+async function productRefs(ch: string, base: string, key: string, shopQ: string, items: SnapItem[]) {
+  const cacheKey = `invRef:${ch}`;
+  const cache = await getSetting<Record<string, string>>(cacheKey, {});
+  for (const it of items) if (!it.upc && cache[it.sku]) { it.upc = cache[it.sku]; it.via = 'catalog'; }
+  const todo = items.filter((i) => !i.upc && !(i.sku in cache));
+  for (let i = 0; i < todo.length; i += 100) {
+    const batch = todo.slice(i, i + 100);
+    for (const type of ['SHOP_SKU', 'SKU']) {
+      const left = batch.filter((b) => !b.upc);
+      if (!left.length) break;
+      const ids = left.map((b) => (type === 'SKU' ? b.pid || b.sku : b.sku)).join(',');
+      let res: Response;
+      try { res = await miraklGet(`${base}/api/products?product_ids=${encodeURIComponent(ids)}&product_id_type=${type}${shopQ ? `&${shopQ}` : ''}`, key); } catch { return; }
+      if (!res.ok) continue;
+      const products: { product_sku?: string; product_id?: string; product_references?: { reference: string; reference_type: string }[] }[] = (await res.json()).products ?? [];
+      for (const p of products) {
+        const ref = (p.product_references ?? []).find((x) => /ean|upc|gtin/i.test(x.reference_type))?.reference ?? (p.product_references ?? []).map((x) => upcIn(x.reference)).find(Boolean);
+        const u = normUpc(ref);
+        if (!u) continue;
+        for (const b of left) if ([b.sku, b.pid].includes(p.product_id) || [b.sku, b.pid].includes(p.product_sku)) { b.upc = u; b.via = 'catalog'; }
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    for (const b of batch) cache[b.sku] = b.upc; // '' = asked, none found
+  }
+  await setSetting(cacheKey, cache);
 }
 
 // ---------- Shopify (barcode = UPC) ----------
