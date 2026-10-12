@@ -6,7 +6,7 @@ import Rail from '@/components/Shell';
 import Spinner from '@/components/Spinner';
 
 type Via = 'upc' | 'catalog' | 'map' | 'sku';
-interface Cell { qty: number; price: number | null; sku: string; want: number | null; state: 'ok' | 'diff' | 'no-shopify'; via: Via }
+interface Cell { qty: number; price: number | null; sku: string; want: number | null; state: 'ok' | 'diff' | 'no-shopify'; via: Via; inactive?: boolean }
 interface ShopCell { qty: number; price: number | null; sku: string; title?: string; variants: number; status?: string }
 interface Row { upc: string; title: string; color: string; size: string; shopify: ShopCell | null; cells: Record<string, Cell | null> }
 interface Status { name: string; pulledAt: string | null; error: string | null; count: number; noUpc: number }
@@ -244,7 +244,7 @@ export default function InventoryPage() {
                         {x.state === 'no-shopify' && <span className="iv-tag none">not on Shopify</span>}
                         {x.state !== 'ok' && <button className="filter iv-fixbtn" onClick={() => setEditing({ channel: c, sku: x.sku, title: `${r.title} ${r.color} ${r.size}`.trim(), qty: x.qty, want: x.want, value: String(x.want ?? x.qty) })}>Fix</button>}
                         <div className="iv-p">{x.sku}{x.price != null ? ` · ${money(x.price)}` : ''}</div>
-                        {viaText[x.via] && <span className="iv-tag via">{viaText[x.via]}</span>}
+                        {x.inactive ? <span className="iv-tag none" title="Listed on this marketplace, but its offer is out of stock / inactive">out of stock</span> : viaText[x.via] && <span className="iv-tag via">{viaText[x.via]}</span>}
                       </td>
                     ); })}
                   </tr>

@@ -125,7 +125,7 @@ export async function pullOffers(ch: string, opts: { force?: boolean } = {}) {
   };
   try {
     let items: SnapItem[] = [];
-    const ex = await miraklGet(`${base}/api/offers/export${shopQ ? `?${shopQ}` : ''}`, key, 'text/csv, */*');
+    const ex = await miraklGet(`${base}/api/offers/export?include_inactive_offers=true${shopQ ? `&${shopQ}` : ''}`, key, 'text/csv, */*');
     if (ex.ok) {
       for (const r of parseCsv(await ex.text())) {
         if (/^(true|1)$/i.test(r['deleted'] ?? '')) continue;
@@ -241,7 +241,7 @@ export async function pullAll() {
 // ---------- the grid ----------
 
 export type Via = 'upc' | 'catalog' | 'map' | 'sku';
-export interface Cell { qty: number; price: number | null; sku: string; want: number | null; state: 'ok' | 'diff' | 'no-shopify'; via: Via }
+export interface Cell { qty: number; price: number | null; sku: string; want: number | null; state: 'ok' | 'diff' | 'no-shopify'; via: Via; inactive?: boolean }
 export interface ShopCell { qty: number; price: number | null; sku: string; title?: string; variants: number; status?: string }
 export interface GridRow { upc: string; title: string; color: string; size: string; shopify: ShopCell | null; cells: Record<string, Cell | null>; mismatch: boolean }
 export interface Unmatched { sku: string; title?: string; qty: number; price: number | null }
@@ -285,7 +285,13 @@ export async function buildGrid() {
       if (!index[c].has(upc)) index[c].set(upc, { it, via });
     }
   }
-  const upcs = new Set<string>(); for (const c of marketplaces) for (const u of index[c].keys()) upcs.add(u);
+  const listed: Record<string, Map<string, string>> = {};
+  for (const c of marketplaces) {
+    listed[c] = new Map();
+    if (c === 'nordstrom') for (const p of await db.product.findMany({ select: { gtin: true, sku: true } })) { const u = normUpc(p.gtin); if (u) listed[c].set(u, p.sku ?? ''); }
+    else for (const cp of await db.channelProduct.findMany({ where: { channelKey: c }, select: { upc: true, channelSku: true } })) { const u = normUpc(cp.upc); if (u) listed[c].set(u, cp.channelSku ?? ''); }
+  }
+  const upcs = new Set<string>(); for (const c of marketplaces) { for (const u of index[c].keys()) upcs.add(u); for (const u of listed[c].keys()) upcs.add(u); }
 
   const rows: GridRow[] = [];
   const shopReady = !!snaps.shopify.pulledAt && !snaps.shopify.error;
@@ -294,11 +300,11 @@ export async function buildGrid() {
     const cells: Record<string, Cell | null> = {};
     let mismatch = false;
     for (const c of marketplaces) {
-      const x = index[c].get(upc);
+      const x = index[c].get(upc) ?? (listed[c].has(upc) ? { it: { upc, sku: listed[c].get(upc) ?? '', qty: 0, price: null } as SnapItem, via: 'catalog' as Via, inactive: true } : null);
       if (!x) { cells[c] = null; continue; }
       const want = shop ? Math.max(0, shop.qty - (cfg.buffers[c] ?? 0)) : null;
       const state: Cell['state'] = !shop ? 'no-shopify' : want === x.it.qty ? 'ok' : 'diff';
-      cells[c] = { qty: x.it.qty, price: x.it.price, sku: x.it.sku, want, state, via: x.via };
+      cells[c] = { qty: x.it.qty, price: x.it.price, sku: x.it.sku, want, state, via: x.via, inactive: 'inactive' in x ? true : undefined };
       if (state === 'diff' || (state === 'no-shopify' && shopReady)) mismatch = true;
     }
     const inf = info.get(upc) ?? { title: shop?.title ?? marketplaces.map((c) => index[c].get(upc)?.it.title).find(Boolean) ?? '', color: '', size: '' };
