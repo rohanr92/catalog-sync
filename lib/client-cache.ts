@@ -57,7 +57,9 @@ export async function getJSON<T = any>(url: string, cb: (data: T) => void): Prom
   const hit = read(url);
   const fresh = fetch(url).then(async (r) => {
     const text = await r.text();
-    const data = JSON.parse(text) as { error?: unknown };
+    let data: { error?: unknown };
+    try { data = JSON.parse(text); }
+    catch { throw new Error(`Server error ${r.status}: ${text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || 'no answer'}`); }
     if (hit && hit.text === text) return;            // nothing changed
     if (!data?.error) write(url, data, text);
     if (latest.get(s) === url) cb(data as T);       // only if you're still looking at it

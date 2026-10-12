@@ -77,7 +77,7 @@ export default function SalesPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    getJSON(`/api/sales?${new URLSearchParams({ days: String(days), group, view, channel, q, page: String(page) })}`, setData).catch(() => toast.error('Could not load sales')).finally(() => setLoading(false));
+    getJSON(`/api/sales?${new URLSearchParams({ days: String(days), group, view, channel, q, page: String(page) })}`, setData).catch((e: Error) => setData((d) => ({ ...(d ?? { days, channels: [], summary: {}, status: {}, counts: {}, total: 0, page: 1, per: 50, rows: [] }), error: e.message }))).finally(() => setLoading(false));
   }, [days, group, view, channel, q, page]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 

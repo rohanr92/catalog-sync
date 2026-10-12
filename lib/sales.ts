@@ -10,12 +10,13 @@ import { connectedChannels, getSnap, getMaps, normUpc, nameOf } from './inventor
 const DAY = 86_400_000;
 const HISTORY_DAYS = 365;
 const DEAD = new Set(['CANCELED', 'CANCELLED', 'REFUSED']);
+const iso = (d: Date | string) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z'); // Mirakl date format: 2026-10-12T08:00:00Z
 
 interface SyncState { from: string; offset: number; backfilled: boolean; lastSync: string | null; total: number; error: string | null; at: string | null }
 const stateKey = (ch: string) => `sales:${ch}`;
 async function getState(ch: string): Promise<SyncState> {
   const v = (await db.setting.findUnique({ where: { key: stateKey(ch) } }))?.value as Partial<SyncState> | undefined;
-  return { from: new Date(Date.now() - HISTORY_DAYS * DAY).toISOString(), offset: 0, backfilled: false, lastSync: null, total: 0, error: null, at: null, ...(v ?? {}) };
+  return { from: iso(new Date(Date.now() - HISTORY_DAYS * DAY)), offset: 0, backfilled: false, lastSync: null, total: 0, error: null, at: null, ...(v ?? {}) };
 }
 async function setState(ch: string, s: SyncState) { await db.setting.upsert({ where: { key: stateKey(ch) }, update: { value: s as never }, create: { key: stateKey(ch), value: s as never } }); }
 
@@ -63,14 +64,14 @@ export async function syncChannel(ch: string, maxPages = 5) {
   try {
     if (!s.backfilled) {
       for (let p = 0; p < maxPages; p++) {
-        const j = await getOrders(ch, { start_date: s.from, sort: 'dateCreated', order: 'asc', offset: String(s.offset) });
+        const j = await getOrders(ch, { start_date: iso(s.from), sort: 'dateCreated', order: 'asc', offset: String(s.offset) });
         const orders = j.orders ?? [];
         await saveOrders(ch, orders);
         s.offset += orders.length; s.total += orders.length;
         if (orders.length < 100) { s.backfilled = true; s.lastSync = started; break; }
       }
     } else {
-      const since = new Date(new Date(s.lastSync ?? started).getTime() - 5 * 60_000).toISOString();
+      const since = iso(new Date(new Date(s.lastSync ?? started).getTime() - 5 * 60_000));
       let offset = 0;
       for (let p = 0; p < 20; p++) {
         const j = await getOrders(ch, { start_update_date: since, offset: String(offset) });
@@ -91,13 +92,13 @@ export async function syncChannel(ch: string, maxPages = 5) {
 }
 
 let running = false;
-export async function salesTick() {
+export async function salesTick(maxPages = 5) {
   if (running) return;
   running = true;
   try {
     for (const ch of await connectedChannels()) {
       const before = await getState(ch);
-      const s = await syncChannel(ch);
+      const s = await syncChannel(ch, maxPages);
       if (s.backfilled && !before.backfilled) await log('pull', `Sales: ${nameOf(ch)} order history loaded (${s.total} orders)`);
     }
   } finally { running = false; }
