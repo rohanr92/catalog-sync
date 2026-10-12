@@ -3,7 +3,7 @@ import { log } from './log';
 
 // Inventory: Shopify + every Mirakl marketplace (Nordstrom included), matched by UPC only. View only.
 
-export interface InvCfg { buffers: Record<string, number> } // units kept back per marketplace
+export interface InvCfg { buffers: Record<string, number>; autoMinutes?: number; orderTrigger?: boolean; orderDelay?: number } // buffers = units kept back per marketplace
 export interface SnapItem { upc: string; sku: string; qty: number; price: number | null; title?: string; state?: string }
 export interface Snap { pulledAt: string | null; error: string | null; items: SnapItem[] }
 export interface PushLog { id: string; sku: string; from: number; to: number; at: string; status: string; ok?: number; failed?: number }

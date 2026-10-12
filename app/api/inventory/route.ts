@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { buildGrid, pullAll, pullOffers, pullShopify, getCfg, saveCfg, fixOne, checkPushes, getPushes } from '@/lib/inventory';
 import { log } from '@/lib/log';
+import { getJob } from '@/lib/inventory-jobs';
 
 export const maxDuration = 300;
 
@@ -19,7 +20,9 @@ export async function GET(req: Request) {
       if (show === 'diff') { const cs = ch ? [r.cells[ch]] : Object.values(r.cells); if (!cs.some((x) => x && x.state !== 'ok')) return false; }
       return !q || `${r.upc} ${r.title} ${r.color} ${r.size} ${Object.values(r.cells).map((c) => c?.sku ?? '').join(' ')}`.toLowerCase().includes(q);
     });
-    return NextResponse.json({ cols: ['shopify', ...marketplaces], marketplaces, status, summary, fixes, total: list.length, page, per, rows: list.slice((page - 1) * per, page * per) });
+    const cfg = await getCfg();
+    const auto = { every: cfg.autoMinutes ?? 10, onOrder: cfg.orderTrigger !== false, delay: cfg.orderDelay ?? 2, job: await getJob() };
+    return NextResponse.json({ auto, cols: ['shopify', ...marketplaces], marketplaces, status, summary, fixes, total: list.length, page, per, rows: list.slice((page - 1) * per, page * per) });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
@@ -38,6 +41,15 @@ export async function POST(req: Request) {
       cfg.buffers[b.channel] = Math.max(0, Math.floor(Number(b.buffer) || 0));
       await saveCfg(cfg);
       await log('settings', `Inventory buffer for ${b.channel} set to ${cfg.buffers[b.channel]}`);
+      return NextResponse.json({ ok: true });
+    }
+    if (b.action === 'auto') {
+      const cfg = await getCfg();
+      cfg.autoMinutes = Math.max(0, Math.floor(Number(b.every) || 0));
+      cfg.orderTrigger = !!b.onOrder;
+      cfg.orderDelay = Math.min(30, Math.max(1, Math.floor(Number(b.delay) || 2)));
+      await saveCfg(cfg);
+      await log('settings', `Inventory auto-refresh: every ${cfg.autoMinutes || 'off'} min, after orders ${cfg.orderTrigger ? cfg.orderDelay + ' min later' : 'off'}`);
       return NextResponse.json({ ok: true });
     }
     if (b.action === 'fix') return NextResponse.json(await fixOne(b.channel, String(b.sku), Number(b.qty)));

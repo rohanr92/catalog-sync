@@ -38,6 +38,7 @@ export async function register() {
   job("mpull", 60_000, async () => { const { channelPullTick } = await import("./lib/channel-pull"); await channelPullTick(); });
   job('status', 60_000, async () => { const { pollOpen } = await import('./lib/dispatch'); await pollOpen(); });
   job('autopush', 5 * 60_000, async () => { const { autoPushTick } = await import('./lib/dispatch'); await autoPushTick(); });
+  job('inventory', 60_000, async () => { const { inventoryTick } = await import('./lib/inventory-jobs'); await inventoryTick(); });
 
   const cleanup = async () => {
     const { db } = await import('./lib/db');

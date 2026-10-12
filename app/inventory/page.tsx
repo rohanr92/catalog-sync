@@ -10,7 +10,8 @@ interface Row { upc: string; title: string; color: string; size: string; shopify
 interface Status { name: string; pulledAt: string | null; error: string | null; count: number; noUpc: number }
 interface Sum { offers: number; ok: number; diff: number; noShopify: number; buffer: number }
 interface Fix { id: string; sku: string; from: number; to: number; at: string; status: string; ok?: number; failed?: number }
-interface Data { cols: string[]; marketplaces: string[]; status: Record<string, Status>; summary: Record<string, Sum>; fixes: Record<string, Fix[]>; total: number; page: number; per: number; rows: Row[]; error?: string }
+interface Auto { every: number; onOrder: boolean; delay: number; job: { lastFull: string | null; lastReason: string | null; pendingAt: string | null; pendingWhy: string | null } }
+interface Data { auto?: Auto; cols: string[]; marketplaces: string[]; status: Record<string, Status>; summary: Record<string, Sum>; fixes: Record<string, Fix[]>; total: number; page: number; per: number; rows: Row[]; error?: string }
 interface Editing { channel: string; sku: string; title: string; qty: number; want: number | null; value: string }
 
 const css = `
@@ -56,6 +57,7 @@ export default function InventoryPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [buffers, setBuffers] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Editing | null>(null);
+  const [auto, setAuto] = useState<{ every: string; onOrder: boolean; delay: string } | null>(null);
 
   const load = useCallback(() => {
     fetch(`/api/inventory?${new URLSearchParams({ q, show, channel, page: String(page) })}`).then((r) => r.json()).then((j: Data) => setData(j)).catch(() => toast.error('Could not load inventory'));
@@ -93,6 +95,10 @@ export default function InventoryPage() {
     catch (e) { toast.error((e as Error).message); }
     setBusy(null);
   }
+  async function saveAuto() {
+    if (!auto) return;
+    try { await post({ action: 'auto', ...auto }); toast.success('Auto refresh saved'); setAuto(null); load(); } catch (e) { toast.error((e as Error).message); }
+  }
   async function check(ch: string) { try { await post({ action: 'check', channel: ch }); load(); } catch (e) { toast.error((e as Error).message); } }
 
   const mk = data?.marketplaces ?? [];
@@ -117,6 +123,22 @@ export default function InventoryPage() {
             {' '}<button className="filter" style={{ fontSize: 11, padding: '1px 6px' }} disabled={!!busy} onClick={() => refresh('shopify')}>↻</button>
           </div>
         )}
+
+        {data?.auto && (() => { const a = auto ?? { every: String(data.auto.every), onOrder: data.auto.onOrder, delay: String(data.auto.delay) }; const j = data.auto.job; return (
+          <div className="iv-card" style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <b style={{ fontSize: 13 }}>Auto refresh</b>
+            <span>every</span>
+            <select value={a.every} onChange={(e) => setAuto({ ...a, every: e.target.value })} style={{ padding: '4px 6px', border: '1px solid var(--rule-strong)', borderRadius: 5, font: 'inherit', fontSize: 12 }}>
+              {['0', '5', '10', '15', '30', '60'].map((m) => <option key={m} value={m}>{m === '0' ? 'off' : `${m} min`}</option>)}
+            </select>
+            <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={a.onOrder} onChange={(e) => setAuto({ ...a, onOrder: e.target.checked })} /> and after a new marketplace order, pull</label>
+            <select value={a.delay} disabled={!a.onOrder} onChange={(e) => setAuto({ ...a, delay: e.target.value })} style={{ padding: '4px 6px', border: '1px solid var(--rule-strong)', borderRadius: 5, font: 'inherit', fontSize: 12 }}>
+              {['1', '2', '3', '5', '10'].map((m) => <option key={m} value={m}>{m} min later</option>)}
+            </select>
+            {auto && <button className="btn primary" style={{ padding: '3px 10px', fontSize: 12 }} onClick={saveAuto}>Save</button>}
+            <span className="status-line" style={{ flex: 1, minWidth: 200 }}>{j.pendingAt ? `⏳ ${j.pendingWhy} — pulling at ${new Date(j.pendingAt).toLocaleTimeString()}` : j.lastFull ? `Last auto pull ${ago(j.lastFull)} (${j.lastReason})` : 'Runs on the live server (Railway), not on your Mac.'}</span>
+          </div>
+        ); })()}
 
         <div className="iv-cards">
           {mk.map((c) => { const s = data!.summary[c]; const st = data!.status[c]; return (
