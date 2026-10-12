@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Suspense } from 'react';
 import useSWR from 'swr';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { LayoutDashboard, Package, Download, ScanBarcode, ListChecks, Images, Send, FolderTree, Tags, ListFilter, Ruler, Upload, Plug, ScrollText, Activity, Wrench, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Package, Download, ScanBarcode, ListChecks, Images, Send, FolderTree, Tags, ListFilter, Ruler, Upload, Plug, ScrollText, Activity, Wrench, Boxes, type LucideIcon } from 'lucide-react';
 import Spinner from './Spinner';
 import { useMounted } from '@/lib/use-mounted';
 import type { ChannelSummary } from '@/lib/types';
@@ -74,6 +74,7 @@ function RailInner() {
       { href: '/images', label: 'Image changes', icon: Images, desc: 'Nordstrom image changes waiting for each marketplace', badge: imgTotal },
       { href: '/results', label: 'Send & results', icon: Send, desc: 'Send approved items and see what each marketplace accepted' },
       { href: "/upc-check", label: "UPC check", icon: ScanBarcode, desc: "UPCs that do not line up between Nordstrom and each marketplace" },
+      { href: "/inventory", label: "Inventory", icon: Boxes, desc: "Marketplace stock vs Shopify, matched by UPC" },
       { href: "/fix-rules", label: "Auto-fix rules", icon: Wrench, desc: "Fix the same marketplace errors automatically before every send" },
       { href: "/health", label: "Listing health", icon: Activity, desc: "Every listing scored 0-100, worst first, with Fix buttons" },
     ] },
