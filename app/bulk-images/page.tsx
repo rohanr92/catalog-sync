@@ -1,4 +1,5 @@
 'use client';
+import { getJSON } from '@/lib/client-cache';
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -60,12 +61,12 @@ export default function BulkImagesPage() {
   const [editing, setEditing] = useState<G | null>(null);
 
   useEffect(() => {
-    fetch('/api/channels').then((r) => r.json()).then((j) => { const cs = (j.channels ?? []) as { key: string; name: string }[]; setChannels(cs); setChannel(cs[0]?.key ?? ''); });
+    getJSON('/api/channels', (j) => { const cs = (j.channels ?? []) as { key: string; name: string }[]; setChannels(cs); setChannel(cs[0]?.key ?? ''); });
   }, []);
 
   const load = useCallback(() => {
     if (!channel) return;
-    fetch(`/api/bulk-images?channel=${channel}&status=${tab}`).then((r) => r.json()).then(setData).catch(() => {});
+    getJSON(`/api/bulk-images?channel=${channel}&status=${tab}`, setData).catch(() => {});
   }, [channel, tab]);
   useEffect(() => { setData(null); load(); }, [load]);
 

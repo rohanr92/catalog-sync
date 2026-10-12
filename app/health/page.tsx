@@ -1,4 +1,5 @@
 'use client';
+import { getJSON } from '@/lib/client-cache';
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -68,7 +69,7 @@ export default function HealthPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch(`/api/health?${new URLSearchParams({ channel, issue, q, page: String(page) })}`).then((r) => r.json()).then((j: Data) => { setData(j); setLoading(false); }).catch(() => setLoading(false));
+    getJSON(`/api/health?${new URLSearchParams({ channel, issue, q, page: String(page) })}`, (j: Data) => { setData(j); setLoading(false); }).catch(() => setLoading(false));
   }, [channel, issue, q, page]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 

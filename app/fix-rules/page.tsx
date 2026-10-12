@@ -1,4 +1,5 @@
 'use client';
+import { getJSON } from '@/lib/client-cache';
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -55,7 +56,7 @@ function RuleForm({ channel, columns, draft, onDone }: { channel: string; column
 
   useEffect(() => {
     if (!needsColumn || !d.column || valueIsColumn) { setValues([]); return; }
-    fetch(`/api/fix-rules?channel=${channel}&values=${encodeURIComponent(d.column)}`).then((r) => r.json()).then((j) => setValues(j.values ?? [])).catch(() => setValues([]));
+    getJSON(`/api/fix-rules?channel=${channel}&values=${encodeURIComponent(d.column)}`, (j) => setValues(j.values ?? [])).catch(() => setValues([]));
   }, [channel, d.column, needsColumn, valueIsColumn]);
 
   async function save() {
@@ -117,7 +118,7 @@ export default function FixRulesPage() {
   const [prev, setPrev] = useState<Preview | null>(null);
 
   useEffect(() => {
-    fetch('/api/channels').then((r) => r.json()).then((j) => {
+    getJSON('/api/channels', (j) => {
       const cs = (j.channels ?? []) as { key: string; name: string }[];
       setChannels(cs);
       const want = new URLSearchParams(window.location.search).get('channel');
@@ -128,8 +129,8 @@ export default function FixRulesPage() {
   const load = useCallback(() => {
     if (!channel) return;
     setData(null); setPrev(null);
-    fetch(`/api/fix-rules?channel=${channel}&preview=1`).then((r) => r.json()).then((j) => setPrev(j.error ? null : j)).catch(() => setPrev(null));
-    fetch(`/api/fix-rules?channel=${channel}`).then((r) => r.json()).then(setData).catch(() => setData({ errors: [], rules: [], columns: [], error: 'Could not load' }));
+    getJSON(`/api/fix-rules?channel=${channel}&preview=1`, (j) => setPrev(j.error ? null : j)).catch(() => setPrev(null));
+    getJSON(`/api/fix-rules?channel=${channel}`, setData).catch(() => setData({ errors: [], rules: [], columns: [], error: 'Could not load' }));
   }, [channel]);
   useEffect(load, [load]);
 

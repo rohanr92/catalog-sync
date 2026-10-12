@@ -1,4 +1,5 @@
 'use client';
+import { getJSON } from '@/lib/client-cache';
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -68,7 +69,7 @@ export default function TrackerPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch(`/api/tracker?${new URLSearchParams({ channel, stage, stuck: stuck ? '1' : '0', q, page: String(page) })}`).then((r) => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
+    getJSON(`/api/tracker?${new URLSearchParams({ channel, stage, stuck: stuck ? '1' : '0', q, page: String(page) })}`, setData).catch(() => {}).finally(() => setLoading(false));
   }, [channel, stage, stuck, q, page]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 

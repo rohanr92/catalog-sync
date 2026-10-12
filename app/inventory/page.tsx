@@ -1,4 +1,5 @@
 'use client';
+import { getJSON } from '@/lib/client-cache';
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -69,7 +70,7 @@ export default function InventoryPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch(`/api/inventory?${new URLSearchParams({ q, show, channel, page: String(page) })}`).then((r) => r.json()).then((j: Data) => setData(j)).catch(() => toast.error('Could not load inventory')).finally(() => setLoading(false));
+    getJSON(`/api/inventory?${new URLSearchParams({ q, show, channel, page: String(page) })}`, (j: Data) => setData(j)).catch(() => toast.error('Could not load inventory')).finally(() => setLoading(false));
   }, [q, show, channel, page]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 

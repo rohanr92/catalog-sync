@@ -1,4 +1,5 @@
 'use client';
+import { getJSON } from '@/lib/client-cache';
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -66,7 +67,7 @@ export default function ImageQualityPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch(`/api/image-quality?${new URLSearchParams({ channel, show, q, page: String(page) })}`).then((r) => r.json()).then(setData).catch(() => toast.error('Could not load')).finally(() => setLoading(false));
+    getJSON(`/api/image-quality?${new URLSearchParams({ channel, show, q, page: String(page) })}`, setData).catch(() => toast.error('Could not load')).finally(() => setLoading(false));
   }, [channel, show, q, page]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 
