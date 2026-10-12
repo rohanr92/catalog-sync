@@ -458,3 +458,40 @@ model ChannelEdit {
 
   @@index([channelKey, status])
 }
+
+model BulkJob {
+  id         String   @id @default(cuid())
+  channelKey String
+  width      Int
+  height     Int
+  status     String   @default("running") // running | done
+  total      Int      @default(0)
+  done       Int      @default(0)
+  failed     Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([channelKey])
+}
+
+model BulkImage {
+  id         String   @id @default(cuid())
+  jobId      String
+  channelKey String
+  groupKey   String
+  styleCode  String
+  color      String
+  title      String   @default("")
+  position   Int
+  sourceUrl  String   @db.Text
+  data       Bytes?   // small preview only; the full size is made again on approval
+  flag       String?
+  status     String   @default("queued") // queued | ready | failed | approved | applied | rejected | manual
+  error      String?  @db.Text
+  resultUrl  String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([jobId])
+  @@index([channelKey, status])
+  @@index([channelKey, groupKey])
+}
